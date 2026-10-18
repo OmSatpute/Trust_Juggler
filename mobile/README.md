@@ -1,15 +1,16 @@
 # Rider account integrity demo
 
-This Expo SDK 57 app presents one account-sharing review workflow. It uses the project's existing voice-verification API and combines it with login-context comparison and a server-stored swipe baseline. The screen is built for this demo; it does not embed the original project screens.
+This Expo SDK 57 app contains two workflows in one install: **Rider** account-integrity checks and **Restaurant** pickup-counter face verification. Use the top switch to move between them. The screens use the same dark navy Trust Operations theme. The rider page uses the Hack_forge API; the restaurant page uses the face-recognition API in the sibling `Hack_forge_2` folder.
 
 ## Configure and run on a local network
 
-1. Copy `.env.example` to `.env` and set `EXPO_PUBLIC_API_BASE_URL` to the computer's LAN IPv4 address, for example `http://192.168.1.25:8000`. Do not use `localhost` on the phone.
-2. Start FastAPI from the repository root as described in `backend/README.md`, binding to `0.0.0.0:8000`.
-3. Keep the phone and computer on the same Wi-Fi. In `mobile/`, run `npx expo start --lan` and scan the QR code in Expo Go.
-4. If the phone cannot reach the backend, allow Python through the computer's firewall for the private network and confirm that both devices are on the same LAN.
+1. Copy `.env.example` to `.env`. Set `EXPO_PUBLIC_API_BASE_URL` to the computer's LAN IPv4 address on port 8000 and `EXPO_PUBLIC_PICKUP_API_URL` to the same address on port 8001. Do not use `localhost` on the phone.
+2. Start the account-integrity API from the repository root as described in `backend/README.md`, binding to `0.0.0.0:8000`.
+3. Start the pickup face-verification API from `Hack_forge_2` as described in that project's README, binding to `0.0.0.0:8001`.
+4. Keep the phone and computer on the same Wi-Fi. From this `mobile/` folder, run `npx expo start --lan` once and scan the QR code in Expo Go. Use the top buttons to switch between Rider and Restaurant.
+5. If the phone cannot reach either backend, allow Python through the computer's firewall for the private network and confirm both devices are on the same LAN.
 
-The companion Trust Operations dashboard is served by FastAPI at `http://<computer-lan-ip>:8000/dashboard`. It reads the same backend and refreshes its signal-check history automatically; open it on a laptop browser while using the phone demo. Keep both on the trusted LAN.
+The Trust Operations dashboard is served by the account-integrity API at `http://<computer-lan-ip>:8000/dashboard`. It reads rider checks and pickup-counter face-verification events forwarded by the `Hack_forge_2` service. Keep both APIs and the phone on the trusted LAN.
 
 ## Demo sequence
 

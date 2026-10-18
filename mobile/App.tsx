@@ -8,6 +8,7 @@ import * as Location from 'expo-location';
 import { DeviceMotion } from 'expo-sensors';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
+import { RestaurantPage } from './RestaurantPage';
 
 type GestureSample = {
   duration_ms: number;
@@ -33,7 +34,7 @@ const ENROLLMENT_MS = 8_000;
 const CALL_MS = 8_000;
 const TRACK_WIDTH = 280;
 
-export default function App() {
+export function RiderPage() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioBusyRef = useRef(false);
@@ -289,7 +290,7 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.topLine}><View><Text style={styles.eyebrow}>HACK FORGE  /  TRUST OPERATIONS</Text><Text style={styles.title}>Rider account integrity</Text></View><View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveText}>DEMO</Text></View></View>
@@ -339,6 +340,37 @@ export default function App() {
         <View style={styles.demoFooter}><Text style={styles.footerTitle}>DEMO STORY</Text><Text style={styles.body}>Enroll the rider on their usual phone, then have another person use the same account, make a swipe, and speak. Return to the assessment to see which independent signals changed. This is evidence for review, not proof of identity.</Text></View>
         <Text style={styles.privacyNote}>No customer PIN or OTP is requested. Account context and swipe baselines persist in local SQLite; voice enrollments clear when the backend restarts.</Text>
       </ScrollView>
+    </View>
+  );
+}
+
+export default function App() {
+  const [page, setPage] = useState<'rider' | 'restaurant'>('rider');
+  return (
+    <SafeAreaView style={styles.appSafe}>
+      <StatusBar barStyle="light-content" />
+      <View style={styles.appHeader}>
+        <View>
+          <Text style={styles.appEyebrow}>HACK FORGE</Text>
+          <Text style={styles.appTitle}>Trust Operations</Text>
+        </View>
+      </View>
+      <View style={styles.appContent}>
+        <View style={[styles.pageLayer, page !== 'rider' && styles.hiddenPage]} pointerEvents={page === 'rider' ? 'auto' : 'none'}>
+          <RiderPage />
+        </View>
+        <View style={[styles.pageLayer, page !== 'restaurant' && styles.hiddenPage]} pointerEvents={page === 'restaurant' ? 'auto' : 'none'}>
+          <RestaurantPage active={page === 'restaurant'} />
+        </View>
+      </View>
+      <View style={styles.pageSwitch}>
+        <Pressable onPress={() => setPage('rider')} accessibilityRole="tab" accessibilityState={{ selected: page === 'rider' }} style={[styles.pageSwitchButton, page === 'rider' && styles.pageSwitchActive]}>
+          <Text style={[styles.pageSwitchText, page === 'rider' && styles.pageSwitchTextActive]}>Rider</Text>
+        </Pressable>
+        <Pressable onPress={() => setPage('restaurant')} accessibilityRole="tab" accessibilityState={{ selected: page === 'restaurant' }} style={[styles.pageSwitchButton, page === 'restaurant' && styles.pageSwitchActive]}>
+          <Text style={[styles.pageSwitchText, page === 'restaurant' && styles.pageSwitchTextActive]}>Restaurant</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }
@@ -400,6 +432,18 @@ function nearestPoint(points: { progress: number; y: number }[], target: number)
 function clamp(value: number) { return Math.max(0, Math.min(1, value)); }
 
 const styles = StyleSheet.create({
+  appSafe: { flex: 1, backgroundColor: '#0B1220' },
+  appHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, backgroundColor: '#0B1220', flexDirection: 'row', alignItems: 'center' },
+  appEyebrow: { color: '#38BDF8', fontSize: 8, fontWeight: '900', letterSpacing: 1.5 },
+  appTitle: { color: '#F8FAFC', fontSize: 15, fontWeight: '900', marginTop: 3 },
+  pageSwitch: { flexDirection: 'row', padding: 4, marginHorizontal: 16, marginTop: 8, marginBottom: 8, borderRadius: 13, backgroundColor: '#111C2E', borderWidth: 1, borderColor: '#263449', gap: 5 },
+  pageSwitchButton: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9 },
+  pageSwitchActive: { backgroundColor: '#1D4ED8' },
+  pageSwitchText: { color: '#94A3B8', fontSize: 10, fontWeight: '800' },
+  pageSwitchTextActive: { color: '#FFFFFF' },
+  appContent: { flex: 1 },
+  pageLayer: { ...StyleSheet.absoluteFill },
+  hiddenPage: { display: 'none' },
   safe: { flex: 1, backgroundColor: '#0F172A' },
   page: { padding: 16, paddingBottom: 30, gap: 12 },
   topLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },

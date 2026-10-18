@@ -1,5 +1,12 @@
 # Project Plan and Work Log
 
+### 2026-10-18 — Pickup face verification in Trust Operations
+
+- **Request:** Reflect the sibling `Hack_forge_2` restaurant pickup-counter face verification output in the dashboard.
+- **Changed:** Added `POST /api/v1/pickup-events` to the dashboard API, mapping face match to passed, mismatch to alert, and no-face/multiple-face to review. The event contains order and partner IDs, result, similarity/threshold, model version, and reason; it does not accept face images or embeddings.
+- **Changed:** The ArcFace pickup API can forward each verification result to the dashboard endpoint using `TRUST_DASHBOARD_EVENT_URL`. Documented port 8000 for the account dashboard API and 8001 for the pickup API; updated the dashboard radar/activity feed for the fourth signal.
+- **Validation:** Both Python backends passed `compileall` using the Hack_forge Python runtime. The face project's own virtualenv could not run because its configured `C:\Python314\python.exe` no longer exists. No tests or phone/face camera walkthrough run.
+
 ### 2026-10-18 — Clarify voice match versus aggregate voice verdict
 
 - **Report:** Voice recognition appears not to identify the enrolled account holder.
@@ -396,3 +403,11 @@ Use this shared interface unless inspection by the other contributors reveals an
 - **Request:** When the result card shows a step-up outcome, label the rider voice result as uncertain instead of same speaker likely.
 - **Changed:** The mobile rider-match box now displays `UNCERTAIN · STEP-UP` whenever the overall API verdict is `step_up`, even if the individual KYC speaker layer passed. The explanation distinguishes a marginal speaker-layer warning from a step-up raised by another layer.
 - **Validation:** `npx tsc --noEmit` passed. `npx expo lint` could not run because ESLint dependencies are absent and the environment has networking disabled; no device run.
+
+### 2026-10-18 — Combine rider and restaurant mobile workflows
+
+- **Request:** Put the rider account-integrity demo and restaurant pickup face verification into one Expo app, with a top-level switch between Rider and Restaurant.
+- **Changed:** Added a shared Trust Operations header and Rider/Restaurant switch in `mobile/App.tsx`. The new `mobile/RestaurantPage.tsx` loads assigned partners and orders from the pickup API, enrolls partner faces, verifies an arriving partner against the selected order, and displays match/review outcomes. The existing pickup backend continues forwarding outcome metadata to the dashboard; image data and face templates are not sent there.
+- **Theme and setup:** Reused the app's dark navy and blue styling, added the SDK 57 `expo-camera` dependency/config, and added `EXPO_PUBLIC_PICKUP_API_URL` alongside the rider API URL. Updated root/mobile run docs to start Expo once from `Hack_forge/mobile` and the two FastAPI services on ports 8000 and 8001.
+- **Validation:** Mobile `tsc --noEmit` passed and `expo config --type public` resolved the camera plugin and both local API variables. Expo lint could not run because ESLint packages are unavailable offline. No device run or tests performed.
+- **Repository boundary:** The combined mobile client is in `Hack_forge/mobile`; the pickup face backend and model files remain in the sibling `Hack_forge_2` project and must still be started separately.

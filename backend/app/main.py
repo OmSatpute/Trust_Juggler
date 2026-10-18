@@ -381,6 +381,23 @@ class DashboardSummary(BaseModel):
     events: list[DashboardEvent]
 
 
+class PickupEventRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=96)
+    order_id: str = Field(min_length=1, max_length=64)
+    assigned_partner_id: str = Field(min_length=1, max_length=64)
+    assigned_partner_name: str = Field(min_length=1, max_length=120)
+    result: Literal["match", "mismatch", "no_face", "multiple_faces"]
+    similarity: float | None = Field(default=None, ge=-1, le=1)
+    threshold: float | None = Field(default=None, ge=0, le=1)
+    model_version: str | None = Field(default=None, max_length=128)
+    reason: str = Field(default="", max_length=500)
+
+
+class PickupEventResponse(BaseModel):
+    accepted: bool
+    event_id: str
+
+
 @app.get("/api/v1/dashboard", response_model=DashboardSummary)
 def dashboard_summary(limit: int = 100) -> DashboardSummary:
     """Return recent account-integrity checks for the trust operations view."""
@@ -392,9 +409,35 @@ def dashboard_summary(limit: int = 100) -> DashboardSummary:
         signal_rows = db.execute("SELECT signal,COUNT(*) FROM account_events WHERE status IN ('alert','review','warn','step_up') GROUP BY signal").fetchall()
     events = [DashboardEvent(event_id=row[0], rider_id=row[1], created_at=row[2], signal=row[3], status=row[4], detail=json.loads(row[5]), severity=row[6]) for row in rows]
     signal_counts = {signal: count for signal, count in signal_rows}
-    for signal in ("context", "swipe", "voice"):
+    for signal in ("context", "swipe", "voice", "pickup_face"):
         signal_counts.setdefault(signal, 0)
     return DashboardSummary(total_checks=counts[0] or 0, alerts=counts[1] or 0, needs_review=counts[2] or 0, riders_with_concerns=riders, signal_counts=signal_counts, events=events)
+
+
+@app.post("/api/v1/pickup-events", response_model=PickupEventResponse)
+def record_pickup_event(request: PickupEventRequest) -> PickupEventResponse:
+    """Record an order-specific face-check outcome from the pickup service.
+
+    The event intentionally excludes face images and embedding templates.
+    """
+    status = "passed" if request.result == "match" else "alert" if request.result == "mismatch" else "review"
+    severity = 0 if status == "passed" else 100 if status == "alert" else 65
+    detail = {
+        "result": request.result,
+        "order_id": request.order_id,
+        "assigned_partner_id": request.assigned_partner_id,
+        "assigned_partner_name": request.assigned_partner_name,
+        "similarity": request.similarity,
+        "threshold": request.threshold,
+        "model_version": request.model_version,
+        "reason": request.reason,
+    }
+    with _account_db() as db:
+        db.execute(
+            "INSERT OR IGNORE INTO account_events VALUES(?,?,?,?,?,?,?)",
+            (request.event_id, request.assigned_partner_id, datetime.now(UTC).isoformat(), "pickup_face", status, json.dumps(detail), severity),
+        )
+    return PickupEventResponse(accepted=True, event_id=request.event_id)
 
 
 @app.post("/api/v1/enrollments", response_model=EnrollmentResponse)

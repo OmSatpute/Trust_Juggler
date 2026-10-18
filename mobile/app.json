@@ -8,6 +8,13 @@
     "userInterfaceStyle": "light",
     "plugins": [
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Trust Operations to scan a delivery partner at pickup.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-audio",
         {
           "microphonePermission": "Allow the app to record a short delivery call sample for rider voice verification.",
