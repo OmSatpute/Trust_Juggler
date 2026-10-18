@@ -1,0 +1,16 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+.expo/
+.env
+.env.*
+!.env.example
+models/
+uploads/
+data/
+.codex-remote-attachments/
