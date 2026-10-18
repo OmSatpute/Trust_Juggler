@@ -4,11 +4,9 @@ import {
   Alert,
   Animated,
   Dimensions,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -100,14 +98,15 @@ export interface LiveSliderMetrics {
 // ---------------------------------------------------------------------------
 // Configuration & Defaults
 // ---------------------------------------------------------------------------
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://10.125.167.137:8000').replace(/\/$/, '');
+const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://10.180.142.251:8000').replace(/\/$/, '');
 const BATCH_SAMPLE_COUNT = 5;
 const BATCH_CAPTURE_MS = 8_000;
 const ENROLLMENT_CAPTURE_MS = 10_000;
 
-export const SLIDER_WIDTH = Math.min(SCREEN_WIDTH - 44, 340);
-export const SLIDER_HEIGHT = 58;
-export const SLIDER_THUMB_SIZE = 50;
+// Strict Fixed Slider Geometry (Position NEVER shifts)
+export const SLIDER_WIDTH = Math.min(SCREEN_WIDTH - 36, 350);
+export const SLIDER_HEIGHT = 56;
+export const SLIDER_THUMB_SIZE = 48;
 export const MAX_SLIDE = SLIDER_WIDTH - SLIDER_THUMB_SIZE - 8;
 
 export function computeEnvelope(values: number[], minBaseMargin: number, decimals: number = 2): MetricEnvelope {
@@ -129,7 +128,7 @@ export function computeEnvelope(values: number[], minBaseMargin: number, decimal
 }
 
 const DEFAULT_SLIDER_BASELINE: SliderBaselineProfile = {
-  name: 'Enrolled KYC Baseline (Rider-01)',
+  name: 'KYC Reference Baseline (Rider-01)',
   baselineCurve: [-2.0, -8.5, -6.2, 1.2],
   curveEnvelopes: [
     { min: -3.5, max: -0.5, margin: 3.5, envMin: -7.0, envMax: 3.0, mean: -2.0 },
@@ -143,7 +142,7 @@ const DEFAULT_SLIDER_BASELINE: SliderBaselineProfile = {
   symmetryEnvelope: { min: 0.33, max: 0.42, margin: 0.08, envMin: 0.25, envMax: 0.50, mean: 0.375 },
   baselineLiftoffVy: -0.320,
   liftoffVyEnvelope: { min: -0.55, max: -0.15, margin: 0.25, envMin: -0.80, envMax: 0.10, mean: -0.320 },
-  calibratedAt: 'Enrolled KYC Baseline (Arnav Nisal)',
+  calibratedAt: 'Enrolled KYC Baseline',
   isCustom: false,
 };
 
@@ -151,8 +150,8 @@ const DEFAULT_SLIDER_BASELINE: SliderBaselineProfile = {
 // Main Component
 // ---------------------------------------------------------------------------
 export default function App() {
-  // Navigation: screen 1 = active_delivery (call customer), screen 2 = complete_delivery
-  const [currentScreen, setCurrentScreen] = useState<'active_delivery' | 'complete_delivery'>('active_delivery');
+  // Three Dedicated Non-Scrollable Screens
+  const [currentScreen, setCurrentScreen] = useState<'call_customer' | 'hardware_gps' | 'complete_delivery'>('call_customer');
 
   // Audio & Voice check state
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -163,7 +162,7 @@ export default function App() {
   const [shiftId] = useState(() => `shift-demo-${new Date().toISOString().slice(0, 10)}`);
   const [callNumber, setCallNumber] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [statusText, setStatusText] = useState('Requesting microphone access…');
+  const [statusText, setStatusText] = useState('Ready for voice verification');
   const [result, setResult] = useState<ApiResponse | null>(null);
 
   // Persistent baseline info
@@ -171,10 +170,9 @@ export default function App() {
   const [lastEnrollmentComparison, setLastEnrollmentComparison] = useState<{
     similarity: number | null;
     verdict: string | null;
-    previousTime: string | null;
   } | null>(null);
 
-  // Screen 2: Location & Device ID state
+  // Screen 2: Hardware & GPS state
   const [isMockLocation, setIsMockLocation] = useState(false);
   const [isRogueDevice, setIsRogueDevice] = useState(false);
   const [locationLabel, setLocationLabel] = useState('Bandra West, Mumbai (Authentic)');
@@ -184,13 +182,13 @@ export default function App() {
   const [alertDispatched, setAlertDispatched] = useState<string | null>(null);
   const [orderCompletedBanner, setOrderCompletedBanner] = useState(false);
 
-  // Slider Biometrics State
+  // Screen 3: Slider Biometrics State & STATIC SLIDER
   const [sliderBaseline, setSliderBaseline] = useState<SliderBaselineProfile>(DEFAULT_SLIDER_BASELINE);
   const [lastSliderResult, setLastSliderResult] = useState<LiveSliderMetrics | null>(null);
-  const [sliderBanner, setSliderBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [sliderFeedback, setSliderFeedback] = useState<{ type: 'success' | 'error' | 'calib'; message: string } | null>(null);
 
-  // Slider Calibration / Enrollment Modal
-  const [isCalibratingSlider, setIsCalibratingSlider] = useState(false);
+  // Slider Mode: 'live' (slide to complete delivery) OR 'calibrate' (3 guided swipes on the SAME static slider)
+  const [sliderMode, setSliderMode] = useState<'live' | 'calibrate'>('live');
   const [calibrationStep, setCalibrationStep] = useState(0); // 0, 1, 2
   const calibrationSwipesRef = useRef<{
     curves: [number, number, number, number][];
@@ -199,9 +197,8 @@ export default function App() {
     liftoffs: number[];
   }>({ curves: [], pitches: [], symmetries: [], liftoffs: [] });
 
-  // Slider Pan & Animation
+  // Pinned Bottom Slider Pan & Trajectory
   const panX = useRef(new Animated.Value(0)).current;
-  const calibPanX = useRef(new Animated.Value(0)).current;
   const startYRef = useRef(0);
   const startTimeRef = useRef(0);
   const smoothYRef = useRef<number | null>(null);
@@ -241,7 +238,7 @@ export default function App() {
   }, []);
 
   // -------------------------------------------------------------------------
-  // Mic Permission & Baseline Status Loading
+  // Baseline Status Loading
   // -------------------------------------------------------------------------
   const fetchBaselineStatus = useCallback(async (rider: string) => {
     if (!API_BASE_URL) return;
@@ -254,7 +251,6 @@ export default function App() {
           setLastEnrollmentComparison({
             similarity: data.similarity_with_previous,
             verdict: data.re_enrollment_verdict,
-            previousTime: data.previous_created_at,
           });
         }
       }
@@ -287,10 +283,10 @@ export default function App() {
   }, [recorder, fetchBaselineStatus, riderId]);
 
   // -------------------------------------------------------------------------
-  // Telemetry & Alert Dispatcher (sends to backend -> Dashboard WebSocket)
+  // Telemetry & Alert Dispatcher (Sends to backend -> updates Dashboard HTML)
   // -------------------------------------------------------------------------
   const sendAlertToDashboard = async (
-    eventType: 'SUDDEN_LOCATION_CHANGE' | 'DEVICE_ID_CHANGE' | 'SLIDER_BIOMETRIC_FAIL' | 'SLIDER_BIOMETRIC_PASS' | 'SET_CURRENT_LOCATION',
+    eventType: 'SUDDEN_LOCATION_CHANGE' | 'DEVICE_ID_CHANGE' | 'SLIDER_BIOMETRIC_FAIL' | 'SLIDER_BIOMETRIC_PASS' | 'SET_CURRENT_LOCATION' | 'SLIDER_CALIBRATION',
     customData?: Record<string, unknown>
   ) => {
     const payload = {
@@ -318,16 +314,13 @@ export default function App() {
     };
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/telemetry`, {
+      await fetch(`${API_BASE_URL}/api/telemetry`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        console.log(`[ALERT DISPATCHED] Event: ${eventType} broadcast to dashboard`);
-      }
     } catch {
-      console.log(`[ALERT OFFLINE] Could not reach ${API_BASE_URL}/api/telemetry`);
+      // Offline fallback
     }
   };
 
@@ -342,7 +335,7 @@ export default function App() {
     setSpeedKmh(24.5);
     setDeviceId('SM-G998B_Android_14_OEM');
     setAlertDispatched('✅ Current location & genuine device restored.');
-    Vibration.vibrate(40);
+    Vibration.vibrate(35);
     await sendAlertToDashboard('SET_CURRENT_LOCATION', {
       stage_1_network_gps: {
         is_impossible_travel: false,
@@ -383,7 +376,7 @@ export default function App() {
     setDeviceId(newId);
     if (nextRogue) {
       setAlertDispatched('⚠️ Alert Dispatched to Dashboard: Hardware Device ID Mismatch!');
-      Vibration.vibrate([0, 150, 100, 150]);
+      Vibration.vibrate([0, 140, 80, 140]);
       await sendAlertToDashboard('DEVICE_ID_CHANGE', {
         stage_1_network_gps: {
           is_impossible_travel: isMockLocation,
@@ -403,11 +396,11 @@ export default function App() {
   };
 
   // -------------------------------------------------------------------------
-  // Audio Recording & Upload Helpers
+  // Audio Recording & Upload
   // -------------------------------------------------------------------------
   const validateSetup = () => {
     if (!permissionGranted) {
-      Alert.alert('Microphone permission required', 'Allow microphone access in settings, then return.');
+      Alert.alert('Microphone permission required', 'Allow microphone access in settings.');
       return false;
     }
     if (!API_BASE_URL) {
@@ -465,7 +458,7 @@ export default function App() {
     const batchId = `enroll-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       for (let index = 0; index < BATCH_SAMPLE_COUNT; index += 1) {
-        setStatusText(`Sample ${index + 1}/${BATCH_SAMPLE_COUNT}: speak naturally for ${ENROLLMENT_CAPTURE_MS / 1000}s…`);
+        setStatusText(`Sample ${index + 1}/${BATCH_SAMPLE_COUNT}: speak for ${ENROLLMENT_CAPTURE_MS / 1000}s…`);
         const uri = await recordClip(ENROLLMENT_CAPTURE_MS);
         setStatusText(`Uploading sample ${index + 1}/${BATCH_SAMPLE_COUNT}…`);
         const payload = await uploadClip(uri, '/api/v1/enrollments/batch-samples', {
@@ -478,14 +471,12 @@ export default function App() {
           const enrollment = payload.enrollment as Record<string, unknown> | undefined;
           const hasPrev = Boolean(enrollment?.has_previous_baseline);
           const simPrev = typeof enrollment?.similarity_with_previous === 'number' ? enrollment.similarity_with_previous : null;
-          const prevTime = typeof enrollment?.previous_created_at === 'string' ? enrollment.previous_created_at : null;
           const reVerdict = typeof enrollment?.re_enrollment_verdict === 'string' ? enrollment.re_enrollment_verdict : null;
 
           if (hasPrev) {
             setLastEnrollmentComparison({
               similarity: simPrev,
               verdict: reVerdict,
-              previousTime: prevTime,
             });
             setStatusText(`Baseline updated! (Similarity with previous: ${simPrev?.toFixed(3) ?? '—'} · ${reVerdict})`);
           } else {
@@ -501,7 +492,7 @@ export default function App() {
         try { await recorder.stop(); } catch {}
       }
       setStatusText('Capture or upload failed');
-      Alert.alert('Enrollment failed', error instanceof Error ? error.message : 'Unexpected capture error.');
+      Alert.alert('Enrollment failed', error instanceof Error ? error.message : 'Capture error.');
     } finally {
       activeRef.current = false;
       setBusy(false);
@@ -533,7 +524,7 @@ export default function App() {
         try { await recorder.stop(); } catch {}
       }
       setStatusText('Capture or upload failed');
-      Alert.alert('Voice check failed', error instanceof Error ? error.message : 'Unexpected capture error.');
+      Alert.alert('Voice check failed', error instanceof Error ? error.message : 'Capture error.');
     } finally {
       activeRef.current = false;
       setBusy(false);
@@ -541,20 +532,17 @@ export default function App() {
   };
 
   // -------------------------------------------------------------------------
-  // Slider Biometrics Calculation & Live Verification
+  // Biometric Gesture Calculation
   // -------------------------------------------------------------------------
   const processSwipeTrajectory = (
     trajectory: { progress: number; relY: number; time: number; pitch: number }[],
-    dx: number,
     totalDurationMs: number,
     rawVy: number,
     baseline: SliderBaselineProfile
   ): LiveSliderMetrics => {
     const lastPitch = currentPitchRef.current;
     const startTime = startTimeRef.current;
-    const endTime = Date.now();
 
-    // Checkpoint extraction helper (at progress = 0.25, 0.50, 0.75, 0.98)
     const getPointAt = (targetProgress: number, fallbackY: number): { y: number; time: number; pitch: number } => {
       if (trajectory.length === 0) return { y: fallbackY, time: startTime + totalDurationMs * targetProgress, pitch: lastPitch };
       const closePts = trajectory.filter((p) => Math.abs(p.progress - targetProgress) < 0.12);
@@ -579,7 +567,6 @@ export default function App() {
     const midpointTime = Math.max(1, cp50.time - startTime);
     const symmetryRatio = Number((midpointTime / totalDurationMs).toFixed(3));
 
-    // Terminal liftoff velocity
     let trajVy = 0;
     if (trajectory.length >= 2) {
       const p1 = trajectory[trajectory.length - 1];
@@ -589,7 +576,6 @@ export default function App() {
     }
     const liftoffVy = Number((0.6 * trajVy + 0.4 * rawVy).toFixed(3));
 
-    // Validate against baseline envelopes
     let curveFailures = 0;
     const failedCurvePoints: number[] = [];
     liveCurve.forEach((val, idx) => {
@@ -622,10 +608,10 @@ export default function App() {
     else if (failureCount >= 3) confidencePct = 14;
 
     const failedMetrics: string[] = [];
-    if (isPitchPushFailed) failedMetrics.push(`Pitch-Push: ${pitchDelta}° [Env: ${pEnv.envMin}°..${pEnv.envMax}°]`);
-    if (isSymmetryFailed) failedMetrics.push(`Velocity Symmetry: ${symmetryRatio} [Env: ${sEnv.envMin}..${sEnv.envMax}]`);
-    if (isLiftoffFailed) failedMetrics.push(`Liftoff Hook: ${liftoffVy} [Env: ${vEnv.envMin}..${vEnv.envMax}]`);
-    if (isCurveFailed) failedMetrics.push(`Thumb Curve: ${failedCurvePoints.length} checkpoints outside baseline envelope`);
+    if (isPitchPushFailed) failedMetrics.push(`Pitch-Push: ${pitchDelta}° [${pEnv.envMin}°..${pEnv.envMax}°]`);
+    if (isSymmetryFailed) failedMetrics.push(`Velocity Symmetry: ${symmetryRatio} [${sEnv.envMin}..${sEnv.envMax}]`);
+    if (isLiftoffFailed) failedMetrics.push(`Liftoff Hook: ${liftoffVy} [${vEnv.envMin}..${vEnv.envMax}]`);
+    if (isCurveFailed) failedMetrics.push(`Curve Checkpoints Failed: ${failedCurvePoints.length}/4 outside envelope`);
 
     return {
       curve: liveCurve,
@@ -649,9 +635,10 @@ export default function App() {
   };
 
   // -------------------------------------------------------------------------
-  // Live Slider PanResponder (Complete Delivery Slider)
+  // PERMANENT STATIC SLIDER PANRESPONDER (Both Live & Calibration Modes)
+  // Position NEVER shifts by 1 pixel between enrollment and completion
   // -------------------------------------------------------------------------
-  const livePanResponder = useRef(
+  const sliderPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 3,
@@ -660,7 +647,6 @@ export default function App() {
         startTimeRef.current = Date.now();
         smoothYRef.current = null;
         trajectoryRef.current = [];
-        setSliderBanner(null);
       },
       onPanResponderMove: (_, gesture) => {
         const clampedDx = Math.max(0, Math.min(MAX_SLIDE, gesture.dx));
@@ -686,155 +672,115 @@ export default function App() {
         const distanceX = Math.max(0, gesture.dx);
 
         if (distanceX >= MAX_SLIDE * 0.72) {
-          const metrics = processSwipeTrajectory(
-            trajectoryRef.current,
-            distanceX,
-            durationMs,
-            gesture.vy ?? 0,
-            sliderBaseline
-          );
-          setLastSliderResult(metrics);
+          // --- MODE 1: CALIBRATION SWIPE ---
+          if (sliderMode === 'calibrate') {
+            Vibration.vibrate(50);
+            const metrics = processSwipeTrajectory(
+              trajectoryRef.current,
+              durationMs,
+              gesture.vy ?? 0,
+              DEFAULT_SLIDER_BASELINE
+            );
 
-          if (metrics.isRejected) {
-            // Biometric Mismatch!
-            Vibration.vibrate([0, 150, 80, 200]);
-            setSliderBanner({
-              type: 'error',
-              message: `⚠️ Biometric Mismatch (Confidence: ${metrics.confidencePct}%): Swipe did not match enrolled rider!`,
-            });
-            void sendAlertToDashboard('SLIDER_BIOMETRIC_FAIL', {
-              slider_metrics: metrics,
-            });
-            // Snap back
-            Animated.spring(panX, { toValue: 0, bounciness: 6, useNativeDriver: false }).start();
-          } else {
-            // Biometric Authentic! Complete delivery & Return to First Screen
-            Vibration.vibrate(80);
-            setSliderBanner({
-              type: 'success',
-              message: `✅ Biometric Match (Confidence: ${metrics.confidencePct}%)! Order Completed.`,
-            });
-            void sendAlertToDashboard('SLIDER_BIOMETRIC_PASS', {
-              slider_metrics: metrics,
-            });
+            calibrationSwipesRef.current.curves.push(metrics.curve);
+            calibrationSwipesRef.current.pitches.push(metrics.pitchDelta);
+            calibrationSwipesRef.current.symmetries.push(metrics.symmetryRatio);
+            calibrationSwipesRef.current.liftoffs.push(metrics.liftoffVy);
 
-            Animated.timing(panX, {
-              toValue: MAX_SLIDE,
-              duration: 150,
-              useNativeDriver: false,
-            }).start(() => {
-              // Return to the first screen (Call Customer) as requested!
-              setTimeout(() => {
-                panX.setValue(0);
-                setCurrentScreen('active_delivery');
-                setOrderCompletedBanner(true);
-              }, 1200);
-            });
+            const nextStep = calibrationStep + 1;
+            panX.setValue(0);
+
+            if (nextStep < 3) {
+              setCalibrationStep(nextStep);
+              setSliderFeedback({
+                type: 'calib',
+                message: `Recorded Swipe ${nextStep}/3. Perform Swipe ${nextStep + 1} across the same slider.`,
+              });
+            } else {
+              // 3 Calibration Swipes Complete! Generate new envelopes
+              const curves = calibrationSwipesRef.current.curves;
+              const pitches = calibrationSwipesRef.current.pitches;
+              const symms = calibrationSwipesRef.current.symmetries;
+              const liftoffs = calibrationSwipesRef.current.liftoffs;
+
+              const env0 = computeEnvelope(curves.map((c) => c[0]), 3.5);
+              const env1 = computeEnvelope(curves.map((c) => c[1]), 3.5);
+              const env2 = computeEnvelope(curves.map((c) => c[2]), 3.5);
+              const env3 = computeEnvelope(curves.map((c) => c[3]), 3.5);
+              const pEnv = computeEnvelope(pitches, 1.25);
+              const sEnv = computeEnvelope(symms, 0.08);
+              const vEnv = computeEnvelope(liftoffs, 0.25);
+
+              const newProfile: SliderBaselineProfile = {
+                name: `Custom Calibrated Profile (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+                baselineCurve: [env0.mean, env1.mean, env2.mean, env3.mean],
+                curveEnvelopes: [env0, env1, env2, env3],
+                baselinePitchPush: pEnv.mean,
+                pitchPushEnvelope: pEnv,
+                baselineSymmetry: sEnv.mean,
+                symmetryEnvelope: sEnv,
+                baselineLiftoffVy: vEnv.mean,
+                liftoffVyEnvelope: vEnv,
+                calibratedAt: new Date().toISOString(),
+                isCustom: true,
+              };
+
+              setSliderBaseline(newProfile);
+              setSliderMode('live');
+              setCalibrationStep(0);
+              calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
+              Vibration.vibrate([0, 100, 50, 150]);
+              setSliderFeedback({
+                type: 'success',
+                message: '✅ New Slider Biometric Enrolled! Slider is now locked to your personal swipe dynamics.',
+              });
+              void sendAlertToDashboard('SLIDER_CALIBRATION');
+            }
+          }
+          // --- MODE 2: LIVE DELIVERY COMPLETION ---
+          else {
+            const metrics = processSwipeTrajectory(
+              trajectoryRef.current,
+              durationMs,
+              gesture.vy ?? 0,
+              sliderBaseline
+            );
+            setLastSliderResult(metrics);
+
+            if (metrics.isRejected) {
+              // Biometric Breach!
+              Vibration.vibrate([0, 160, 80, 220]);
+              setSliderFeedback({
+                type: 'error',
+                message: `⚠️ Biometric Mismatch (${metrics.confidencePct}% Confidence): Trajectory outside biological baseline!`,
+              });
+              void sendAlertToDashboard('SLIDER_BIOMETRIC_FAIL', { slider_metrics: metrics });
+              Animated.spring(panX, { toValue: 0, bounciness: 6, useNativeDriver: false }).start();
+            } else {
+              // Biometric Verified! Complete Order & Return to Screen 1 (Call Customer)
+              Vibration.vibrate(70);
+              setSliderFeedback({
+                type: 'success',
+                message: `✅ Biometric Match (${metrics.confidencePct}% Confidence)! Order Completed.`,
+              });
+              void sendAlertToDashboard('SLIDER_BIOMETRIC_PASS', { slider_metrics: metrics });
+
+              Animated.timing(panX, {
+                toValue: MAX_SLIDE,
+                duration: 140,
+                useNativeDriver: false,
+              }).start(() => {
+                setTimeout(() => {
+                  panX.setValue(0);
+                  setCurrentScreen('call_customer');
+                  setOrderCompletedBanner(true);
+                }, 1000);
+              });
+            }
           }
         } else {
-          // Incomplete swipe snap back
+          // Snap back if swipe wasn't completed
           Animated.spring(panX, { toValue: 0, bounciness: 5, useNativeDriver: false }).start();
-        }
-      },
-    })
-  ).current;
-
-  // -------------------------------------------------------------------------
-  // Calibration Slider PanResponder (Enroll New Slider Biometric)
-  // -------------------------------------------------------------------------
-  const calibPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 3,
-      onPanResponderGrant: (_, gesture) => {
-        startYRef.current = gesture.y0;
-        startTimeRef.current = Date.now();
-        smoothYRef.current = null;
-        trajectoryRef.current = [];
-      },
-      onPanResponderMove: (_, gesture) => {
-        const clampedDx = Math.max(0, Math.min(MAX_SLIDE, gesture.dx));
-        const progress = clampedDx / MAX_SLIDE;
-        const rawRelY = gesture.moveY - startYRef.current;
-        const prevSmooth = smoothYRef.current ?? rawRelY;
-        const diffY = Math.abs(rawRelY - prevSmooth);
-        const alpha = diffY < 1.5 ? 0.20 : 0.40;
-        const smoothRelY = alpha * rawRelY + (1 - alpha) * prevSmooth;
-        smoothYRef.current = smoothRelY;
-
-        trajectoryRef.current.push({
-          progress,
-          relY: smoothRelY,
-          time: Date.now(),
-          pitch: currentPitchRef.current,
-        });
-        calibPanX.setValue(clampedDx);
-      },
-      onPanResponderRelease: (_, gesture) => {
-        const durationMs = Math.max(1, Date.now() - startTimeRef.current);
-        const distanceX = Math.max(0, gesture.dx);
-
-        if (distanceX >= MAX_SLIDE * 0.72) {
-          Vibration.vibrate(50);
-          const metrics = processSwipeTrajectory(
-            trajectoryRef.current,
-            distanceX,
-            durationMs,
-            gesture.vy ?? 0,
-            DEFAULT_SLIDER_BASELINE
-          );
-
-          calibrationSwipesRef.current.curves.push(metrics.curve);
-          calibrationSwipesRef.current.pitches.push(metrics.pitchDelta);
-          calibrationSwipesRef.current.symmetries.push(metrics.symmetryRatio);
-          calibrationSwipesRef.current.liftoffs.push(metrics.liftoffVy);
-
-          const nextStep = calibrationStep + 1;
-          calibPanX.setValue(0);
-
-          if (nextStep < 3) {
-            setCalibrationStep(nextStep);
-          } else {
-            // 3 Swipes collected! Compute new personalized baseline
-            const curves = calibrationSwipesRef.current.curves;
-            const pitches = calibrationSwipesRef.current.pitches;
-            const symms = calibrationSwipesRef.current.symmetries;
-            const liftoffs = calibrationSwipesRef.current.liftoffs;
-
-            const env0 = computeEnvelope(curves.map((c) => c[0]), 3.5);
-            const env1 = computeEnvelope(curves.map((c) => c[1]), 3.5);
-            const env2 = computeEnvelope(curves.map((c) => c[2]), 3.5);
-            const env3 = computeEnvelope(curves.map((c) => c[3]), 3.5);
-            const pEnv = computeEnvelope(pitches, 1.25);
-            const sEnv = computeEnvelope(symms, 0.08);
-            const vEnv = computeEnvelope(liftoffs, 0.25);
-
-            const newProfile: SliderBaselineProfile = {
-              name: `Custom Enrolled Profile (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
-              baselineCurve: [env0.mean, env1.mean, env2.mean, env3.mean],
-              curveEnvelopes: [env0, env1, env2, env3],
-              baselinePitchPush: pEnv.mean,
-              pitchPushEnvelope: pEnv,
-              baselineSymmetry: sEnv.mean,
-              symmetryEnvelope: sEnv,
-              baselineLiftoffVy: vEnv.mean,
-              liftoffVyEnvelope: vEnv,
-              calibratedAt: new Date().toISOString(),
-              isCustom: true,
-            };
-
-            setSliderBaseline(newProfile);
-            setIsCalibratingSlider(false);
-            setCalibrationStep(0);
-            calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
-            Vibration.vibrate([0, 100, 50, 150]);
-            setSliderBanner({
-              type: 'success',
-              message: '🎉 New Slider Biometric Baseline successfully calibrated and enrolled!',
-            });
-          }
-        } else {
-          Animated.spring(calibPanX, { toValue: 0, bounciness: 5, useNativeDriver: false }).start();
         }
       },
     })
@@ -853,14 +799,22 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" />
 
-      {/* Top Header Navigation Tabs */}
+      {/* Top Fixed Screen Switcher Tabs */}
       <View style={styles.topNav}>
         <Pressable
-          onPress={() => setCurrentScreen('active_delivery')}
-          style={[styles.navTab, currentScreen === 'active_delivery' && styles.navTabActive]}
+          onPress={() => setCurrentScreen('call_customer')}
+          style={[styles.navTab, currentScreen === 'call_customer' && styles.navTabActive]}
         >
-          <Text style={[styles.navTabText, currentScreen === 'active_delivery' && styles.navTabTextActive]}>
+          <Text style={[styles.navTabText, currentScreen === 'call_customer' && styles.navTabTextActive]}>
             1. Call Customer
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setCurrentScreen('hardware_gps')}
+          style={[styles.navTab, currentScreen === 'hardware_gps' && styles.navTabActive]}
+        >
+          <Text style={[styles.navTabText, currentScreen === 'hardware_gps' && styles.navTabTextActive]}>
+            2. Hardware & GPS
           </Text>
         </Pressable>
         <Pressable
@@ -868,83 +822,59 @@ export default function App() {
           style={[styles.navTab, currentScreen === 'complete_delivery' && styles.navTabActive]}
         >
           <Text style={[styles.navTabText, currentScreen === 'complete_delivery' && styles.navTabTextActive]}>
-            2. Complete Delivery
+            3. Complete Delivery
           </Text>
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.page}>
-        {/* =================================================================== */}
-        {/* SCREEN 1: ACTIVE DELIVERY (CALL CUSTOMER)                           */}
-        {/* =================================================================== */}
-        {currentScreen === 'active_delivery' && (
-          <View>
-            <View style={styles.orderBadgeRow}>
-              <View style={styles.statusPill}>
-                <View style={styles.greenDot} />
-                <Text style={styles.statusPillText}>ACTIVE ORDER #HF-9402</Text>
-              </View>
-              <Pressable
-                onPress={() => setCurrentScreen('complete_delivery')}
-                style={styles.goToCompleteButton}
-              >
-                <Text style={styles.goToCompleteButtonText}>Complete Delivery Screen →</Text>
-              </Pressable>
+      {/* =================================================================== */}
+      {/* SCREEN 1: CALL CUSTOMER (VOICE CHECK) — STRICTLY NON-SCROLLABLE    */}
+      {/* =================================================================== */}
+      {currentScreen === 'call_customer' && (
+        <View style={styles.nonScrollablePage}>
+          <View style={styles.headerRow}>
+            <View style={styles.statusPill}>
+              <View style={styles.greenDot} />
+              <Text style={styles.statusPillText}>ACTIVE ORDER #HF-9402</Text>
             </View>
+            <View style={[styles.badge, enrollmentStatus?.enrolled ? styles.badgeSuccess : styles.badgeWarn]}>
+              <Text style={[styles.badgeText, enrollmentStatus?.enrolled ? styles.badgeTextSuccess : styles.badgeTextWarn]}>
+                {enrollmentStatus?.enrolled ? '5/5 BASELINE ENROLLED' : 'NO BASELINE'}
+              </Text>
+            </View>
+          </View>
 
-            {orderCompletedBanner && (
-              <View style={styles.completedToast}>
-                <Text style={styles.completedToastTitle}>🎉 ORDER DELIVERED SUCCESSFULLY</Text>
-                <Text style={styles.completedToastSub}>Biometric slider verification passed. Ready for next order assignment.</Text>
+          {orderCompletedBanner && (
+            <View style={styles.completedToast}>
+              <Text style={styles.completedToastTitle}>🎉 ORDER DELIVERED SUCCESSFULLY</Text>
+              <Text style={styles.completedToastSub}>Biometric slider verification passed on device.</Text>
+            </View>
+          )}
+
+          <Text style={styles.eyebrow}>STEP 1: RIDER VOICE CHECK</Text>
+          <Text style={styles.title}>Call Customer</Text>
+
+          {/* Voice Baseline Status Card */}
+          <View style={styles.compactCard}>
+            <Text style={styles.compactCardLabel}>ENROLLED VOICE BASELINE</Text>
+            <Text style={styles.compactCardVal}>
+              {enrollmentStatus?.enrolled
+                ? `Saved to persistent storage (${enrollmentStatus.created_at ? new Date(enrollmentStatus.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Ready'})`
+                : 'No baseline enrolled yet.'}
+            </Text>
+            {enrollmentStatus?.has_previous_baseline && lastEnrollmentComparison?.similarity != null && (
+              <View style={styles.previousComparisonBox}>
+                <Text style={styles.previousComparisonText}>
+                  Previous baseline cosine match: <Text style={styles.boldText}>{lastEnrollmentComparison.similarity.toFixed(3)}</Text> ({lastEnrollmentComparison.verdict ?? 'Same speaker'})
+                </Text>
               </View>
             )}
+          </View>
 
-            <Text style={styles.eyebrow}>RIDER VOICE CHECK</Text>
-            <Text style={styles.title}>Customer Voice Check</Text>
-            <Text style={styles.subtitle}>
-              Build a five-clip rider baseline (saved persistently on backend), then verify the rider during Call Customer.
-            </Text>
-
-            {/* Baseline Profile Status Card */}
-            <View style={styles.baselineStatusCard}>
-              <View style={styles.baselineHeader}>
-                <Text style={styles.baselineTitle}>RIDER VOICE BASELINE</Text>
-                <View style={[styles.badge, enrollmentStatus?.enrolled ? styles.badgeSuccess : styles.badgeWarn]}>
-                  <Text style={[styles.badgeText, enrollmentStatus?.enrolled ? styles.badgeTextSuccess : styles.badgeTextWarn]}>
-                    {enrollmentStatus?.enrolled ? `${enrollmentStatus.sample_count}/5 CLIPS ENROLLED` : 'NO BASELINE'}
-                  </Text>
-                </View>
-              </View>
-
-              {enrollmentStatus?.enrolled ? (
-                <View>
-                  <Text style={styles.baselineDetailText}>
-                    Active KYC baseline saved to disk. Last updated: {enrollmentStatus.created_at ? new Date(enrollmentStatus.created_at).toLocaleTimeString() : 'Recent session'}.
-                  </Text>
-                  {enrollmentStatus.has_previous_baseline && enrollmentStatus.similarity_with_previous != null && (
-                    <View style={styles.previousComparisonBox}>
-                      <Text style={styles.previousComparisonLabel}>PREVIOUS BASELINE COMPARISON</Text>
-                      <Text style={styles.previousComparisonValue}>
-                        Cosine Similarity: {enrollmentStatus.similarity_with_previous.toFixed(3)}
-                      </Text>
-                      <Text style={styles.previousComparisonSub}>
-                        {enrollmentStatus.similarity_with_previous >= 0.25
-                          ? '✅ Verified: Matches previous baseline (Consistent speaker)'
-                          : '⚠️ Caution: Drift from previous baseline'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              ) : (
-                <Text style={styles.baselineDetailText}>
-                  No baseline on record for this rider. Tap Enroll Five Voice Samples below to record 5 clips and save the profile.
-                </Text>
-              )}
-            </View>
-
-            {/* Voice Capture Controls */}
-            <View style={styles.card}>
-              <Text style={styles.label}>RIDER IDENTIFIER</Text>
+          {/* Voice Actions Card */}
+          <View style={styles.compactCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.inputLabel}>RIDER ID:</Text>
               <TextInput
                 value={riderId}
                 onChangeText={(val) => {
@@ -953,396 +883,352 @@ export default function App() {
                 }}
                 autoCapitalize="none"
                 editable={!busy}
-                style={styles.input}
+                style={styles.compactInput}
               />
-              <Text style={styles.helper}>Next shift slot: Call #{callNumber}</Text>
-
-              <Pressable
-                disabled={busy || !permissionGranted}
-                onPress={() => void captureEnrollmentBatch()}
-                style={[styles.buttonSecondary, (busy || !permissionGranted) && styles.buttonDisabled]}
-              >
-                <Text style={styles.buttonSecondaryText}>
-                  {enrollmentStatus?.enrolled ? 'Re-enroll Baseline · 5 × 10s (Compares with Old)' : 'Enroll Five Voice Samples · 5 × 10s'}
-                </Text>
-              </Pressable>
-              <Text style={styles.helper}>
-                Records five separate 10s clips from the rider. The backend persists the baseline on disk and compares re-enrollment against your previous baseline.
-              </Text>
-
-              <Pressable
-                disabled={busy || !permissionGranted}
-                onPress={() => void captureCall()}
-                style={[styles.button, (busy || !permissionGranted) && styles.buttonDisabled]}
-              >
-                {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Call Customer · Record 8s</Text>}
-              </Pressable>
-              <Text style={styles.status}>{statusText}</Text>
-            </View>
-
-            {/* Voice Check Result Card */}
-            {result && (
-              <View style={[styles.resultCard, { borderColor: verdictColor }]}>
-                <View style={[styles.banner, { backgroundColor: verdictColor }]}>
-                  <Text style={styles.bannerText}>{result.verdict.replace('_', ' ').toUpperCase()}</Text>
-                </View>
-                <View style={[styles.speakerVerdict, { borderColor: speakerVerdict.color }]}>
-                  <Text style={styles.metricLabel}>RIDER VOICE MATCH</Text>
-                  <Text style={[styles.speakerVerdictText, { color: speakerVerdict.color }]}>{speakerVerdict.label}</Text>
-                  <Text style={styles.layerReason}>{speakerVerdict.description}</Text>
-                </View>
-                <View style={styles.metrics}>
-                  <Metric label="Median similarity · 5 samples" value={formatScore(result.kyc_similarity)} />
-                  <Metric label="Similarity spread" value={formatScore(result.sample_score_spread)} />
-                  <Metric label="Shift similarity" value={result.shift_similarity == null ? 'Run Call #1 first' : formatScore(result.shift_similarity)} />
-                  <Metric label="VAD removed" value={result.vad_noise_reduction_pct == null ? '—' : `${result.vad_noise_reduction_pct.toFixed(1)}%`} />
-                  <Metric label="Detected speech" value={result.speech_duration_seconds == null ? '—' : `${result.speech_duration_seconds.toFixed(1)}s`} />
-                  {result.sample_scores.map((score, index) => (
-                    <Metric key={index} label={`Enrollment clip ${index + 1}`} value={formatScore(score)} />
-                  ))}
-                </View>
-                <Text style={styles.label}>SPEAKER MODEL</Text>
-                <Text style={styles.modelName}>{result.speaker_model}</Text>
-                {Object.entries(result.layers).map(([name, layer]) => (
-                  <View key={name} style={styles.layerRow}>
-                    <Text style={[styles.layerName, { color: layerColor(layer.status) }]}>
-                      {name.replaceAll('_', ' ')} · {layer.status}
-                    </Text>
-                    <Text style={styles.layerReason}>{layer.reason}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Next Screen CTA */}
-            <View style={styles.proceedCard}>
-              <Text style={styles.proceedCardTitle}>READY FOR DELIVERY COMPLETION?</Text>
-              <Text style={styles.proceedCardSub}>Proceed to complete delivery, test mock locations, and swipe the biometric slider.</Text>
-              <Pressable
-                onPress={() => setCurrentScreen('complete_delivery')}
-                style={styles.proceedPrimaryButton}
-              >
-                <Text style={styles.proceedPrimaryButtonText}>Go to Complete Delivery Screen →</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-
-        {/* =================================================================== */}
-        {/* SCREEN 2: COMPLETE DELIVERY SCREEN                                  */}
-        {/* =================================================================== */}
-        {currentScreen === 'complete_delivery' && (
-          <View>
-            <View style={styles.orderBadgeRow}>
-              <Pressable
-                onPress={() => setCurrentScreen('active_delivery')}
-                style={styles.backButton}
-              >
-                <Text style={styles.backButtonText}>← Back to Call Customer</Text>
-              </Pressable>
-              <View style={[styles.badge, isMockLocation ? styles.badgeDanger : styles.badgeSuccess]}>
-                <Text style={[styles.badgeText, isMockLocation ? styles.badgeTextDanger : styles.badgeTextSuccess]}>
-                  {isMockLocation ? 'SPOOFED GPS' : 'NORMAL GPS'}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={styles.eyebrow}>ORDER DROP-OFF</Text>
-            <Text style={styles.title}>Complete Delivery</Text>
-            <Text style={styles.subtitle}>
-              Test sudden mock location and device ID alerts sent to the dashboard, and verify the biometric slider.
-            </Text>
-
-            {/* Alert banner if triggered */}
-            {alertDispatched && (
-              <View style={[styles.alertBannerBox, isMockLocation ? styles.alertBannerDanger : styles.alertBannerSuccess]}>
-                <Text style={styles.alertBannerText}>{alertDispatched}</Text>
-              </View>
-            )}
-
-            {/* SECTION 1: Location & Hardware Telemetry (The 2 Mock Location Controls) */}
-            <View style={styles.card}>
-              <Text style={styles.sectionHeader}>LOCATION & HARDWARE CONTROLS</Text>
-              <Text style={styles.helper}>
-                Sudden jumps in location or changed device ID will trigger immediate alerts on the Control Tower Dashboard via WebSocket.
-              </Text>
-
-              <View style={styles.telemetryGrid}>
-                <View style={styles.telemetryCol}>
-                  <Text style={styles.metricLabel}>CURRENT LOCATION</Text>
-                  <Text style={styles.telemetryValue} numberOfLines={1}>{locationLabel}</Text>
-                  <Text style={styles.subtext}>{coordinates.lat.toFixed(4)}° N, {coordinates.lon.toFixed(4)}° E</Text>
-                </View>
-                <View style={styles.telemetryCol}>
-                  <Text style={styles.metricLabel}>SIMULATED SPEED</Text>
-                  <Text style={[styles.telemetryValue, speedKmh > 100 && styles.telemetryValueDanger]}>
-                    {speedKmh.toFixed(1)} km/h
-                  </Text>
-                  <Text style={styles.subtext}>{speedKmh > 100 ? 'IMPOSSIBLE TRAVEL' : 'Road Transit'}</Text>
-                </View>
-              </View>
-
-              <View style={styles.deviceRow}>
-                <Text style={styles.metricLabel}>DEVICE HARDWARE ID</Text>
-                <Text style={[styles.deviceIdText, isRogueDevice && styles.deviceIdTextDanger]}>{deviceId}</Text>
-              </View>
-
-              {/* Location Control Buttons */}
-              <View style={styles.buttonRow}>
-                <Pressable
-                  onPress={() => void handleSetCurrentLocation()}
-                  style={[styles.locationBtn, styles.locationBtnNormal]}
-                >
-                  <Text style={styles.locationBtnNormalText}>📍 Set Current Location</Text>
-                  <Text style={styles.btnSub}>Authentic GPS & Device</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => void handleSetMockLocation()}
-                  style={[styles.locationBtn, styles.locationBtnMock]}
-                >
-                  <Text style={styles.locationBtnMockText}>⚡ Set Mock Location</Text>
-                  <Text style={styles.btnSubDanger}>Sudden Leap Alert (850km/h)</Text>
-                </Pressable>
-              </View>
-
-              <Pressable
-                onPress={() => void handleToggleDeviceId()}
-                style={[styles.deviceToggleBtn, isRogueDevice && styles.deviceToggleBtnActive]}
-              >
-                <Text style={[styles.deviceToggleText, isRogueDevice && styles.deviceToggleTextActive]}>
-                  {isRogueDevice ? '📱 Restore Genuine Device ID' : '📱 Switch to Rogue / Spoofed Device ID'}
-                </Text>
-              </Pressable>
-            </View>
-
-            {/* SECTION 2: Slider Biometric Baseline & Enrollment */}
-            <View style={styles.card}>
-              <View style={styles.baselineHeader}>
-                <Text style={styles.sectionHeader}>SLIDER BIOMETRIC PROFILE</Text>
-                <View style={[styles.badge, sliderBaseline.isCustom ? styles.badgeSuccess : styles.badgeNeutral]}>
-                  <Text style={[styles.badgeText, sliderBaseline.isCustom ? styles.badgeTextSuccess : styles.badgeTextNeutral]}>
-                    {sliderBaseline.isCustom ? 'CUSTOM CALIBRATED' : 'DEFAULT BASELINE'}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.sliderProfileName}>{sliderBaseline.name}</Text>
-
-              <View style={styles.sliderProfileGrid}>
-                <View style={styles.profileParam}>
-                  <Text style={styles.metricLabel}>THUMB CURVE</Text>
-                  <Text style={styles.profileParamVal}>[{sliderBaseline.baselineCurve.map((v) => v.toFixed(1)).join(', ')}] px</Text>
-                </View>
-                <View style={styles.profileParam}>
-                  <Text style={styles.metricLabel}>PITCH-PUSH</Text>
-                  <Text style={styles.profileParamVal}>+{sliderBaseline.baselinePitchPush.toFixed(1)}°</Text>
-                </View>
-                <View style={styles.profileParam}>
-                  <Text style={styles.metricLabel}>VELOCITY SYMMETRY</Text>
-                  <Text style={styles.profileParamVal}>{sliderBaseline.baselineSymmetry.toFixed(3)}</Text>
-                </View>
-                <View style={styles.profileParam}>
-                  <Text style={styles.metricLabel}>LIFTOFF HOOK</Text>
-                  <Text style={styles.profileParamVal}>{sliderBaseline.baselineLiftoffVy.toFixed(3)} px/ms</Text>
-                </View>
-              </View>
-
-              <Pressable
-                onPress={() => {
-                  setCalibrationStep(0);
-                  calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
-                  setIsCalibratingSlider(true);
-                }}
-                style={styles.enrollSliderBtn}
-              >
-                <Text style={styles.enrollSliderBtnText}>🎯 Enroll New Slider Biometric (3 Swipes)</Text>
-              </Pressable>
-              <Text style={styles.helper}>
-                Calibrate a personalized neuromuscular biometric profile. The slider below verifies authentic thumb curvature vs robotic or impostor swipes.
-              </Text>
-            </View>
-
-            {/* Last Slider Result Card */}
-            {lastSliderResult && (
-              <View style={[styles.resultCard, { borderColor: lastSliderResult.isRejected ? '#ba3038' : '#147d53' }]}>
-                <View style={[styles.banner, { backgroundColor: lastSliderResult.isRejected ? '#ba3038' : '#147d53' }]}>
-                  <Text style={styles.bannerText}>
-                    {lastSliderResult.isRejected ? 'SLIDER BIOMETRIC REJECTED · IMPOSTOR SUSPECTED' : 'SLIDER BIOMETRIC VERIFIED · AUTHENTIC'}
-                  </Text>
-                </View>
-                <View style={styles.metrics}>
-                  <Metric label="Rider Confidence" value={`${lastSliderResult.confidencePct}%`} />
-                  <Metric label="Thumb Checkpoints" value={`${lastSliderResult.curveCheckpointsPassed}/4 passed`} />
-                  <Metric label="Pitch-Push Delta" value={`${lastSliderResult.pitchDelta}°`} />
-                  <Metric label="Velocity Symmetry" value={`${lastSliderResult.symmetryRatio}`} />
-                  <Metric label="Swipe Duration" value={`${lastSliderResult.totalTimeMs} ms`} />
-                  <Metric label="Liftoff Hook (vy)" value={`${lastSliderResult.liftoffVy}`} />
-                </View>
-                {lastSliderResult.failedMetrics.length > 0 && (
-                  <View style={styles.failedMetricsBox}>
-                    <Text style={styles.failedMetricsTitle}>DIVERGENCE BREACHES:</Text>
-                    {lastSliderResult.failedMetrics.map((msg, i) => (
-                      <Text key={i} style={styles.failedMetricItem}>• {msg}</Text>
-                    ))}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {sliderBanner && (
-              <View style={[styles.sliderBannerBox, sliderBanner.type === 'error' ? styles.sliderBannerError : styles.sliderBannerSuccess]}>
-                <Text style={styles.sliderBannerText}>{sliderBanner.message}</Text>
-              </View>
-            )}
-
-            {/* SECTION 3: The Live Swipe to Complete Delivery Slider */}
-            <View style={styles.sliderContainerCard}>
-              <Text style={styles.sliderPromptText}>SLIDE TO COMPLETE ORDER</Text>
-              <Text style={styles.sliderSubPrompt}>
-                Verifies thumb arc, tilt, and velocity against enrolled baseline. Successfully completing will return you to Call Customer.
-              </Text>
-
-              <View style={styles.sliderTrack}>
-                <View style={styles.sliderTrackGlow} />
-                <Text style={styles.sliderTrackLabel}>Slide to Complete →</Text>
-
-                <Animated.View
-                  {...livePanResponder.panHandlers}
-                  style={[
-                    styles.sliderThumb,
-                    { transform: [{ translateX: panX }] },
-                  ]}
-                >
-                  <Text style={styles.sliderThumbIcon}>→</Text>
-                </Animated.View>
-              </View>
-            </View>
-          </View>
-        )}
-
-        <Text style={styles.footnote}>Trust Juggler Multi-Modal Biometric Security · ECAPA Voice & Kinetic Slider</Text>
-      </ScrollView>
-
-      {/* =================================================================== */}
-      {/* MODAL: ENROLL NEW SLIDER BIOMETRIC (3-SWIPE CALIBRATION)            */}
-      {/* =================================================================== */}
-      <Modal visible={isCalibratingSlider} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>ENROLL SLIDER BIOMETRIC</Text>
-            <Text style={styles.modalStep}>Swipe {calibrationStep + 1} of 3</Text>
-            <Text style={styles.modalInstructions}>
-              Slide naturally across the track below. Maintain your normal one-handed grip to record your personal thumb arc and pressure dynamics.
-            </Text>
-
-            <View style={styles.modalStepIndicatorRow}>
-              {[0, 1, 2].map((step) => (
-                <View
-                  key={step}
-                  style={[
-                    styles.stepPill,
-                    step === calibrationStep && styles.stepPillActive,
-                    step < calibrationStep && styles.stepPillCompleted,
-                  ]}
-                >
-                  <Text style={styles.stepPillText}>
-                    {step < calibrationStep ? '✓ Done' : `Swipe ${step + 1}`}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.modalSliderTrack}>
-              <Text style={styles.modalTrackLabel}>Swipe naturally across →</Text>
-              <Animated.View
-                {...calibPanResponder.panHandlers}
-                style={[
-                  styles.sliderThumb,
-                  { transform: [{ translateX: calibPanX }] },
-                ]}
-              >
-                <Text style={styles.sliderThumbIcon}>→</Text>
-              </Animated.View>
+              <Text style={styles.shiftSlotText}>Slot: Call #{callNumber}</Text>
             </View>
 
             <Pressable
-              onPress={() => {
-                setIsCalibratingSlider(false);
-                setCalibrationStep(0);
-              }}
-              style={styles.modalCancelBtn}
+              disabled={busy || !permissionGranted}
+              onPress={() => void captureEnrollmentBatch()}
+              style={[styles.buttonSecondary, (busy || !permissionGranted) && styles.buttonDisabled]}
             >
-              <Text style={styles.modalCancelBtnText}>Cancel Calibration</Text>
+              <Text style={styles.buttonSecondaryText}>
+                {enrollmentStatus?.enrolled ? 'Re-enroll Baseline · 5 × 10s (Compares with Old)' : 'Enroll Five Voice Samples · 5 × 10s'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              disabled={busy || !permissionGranted}
+              onPress={() => void captureCall()}
+              style={[styles.buttonPrimary, (busy || !permissionGranted) && styles.buttonDisabled]}
+            >
+              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonPrimaryText}>Call Customer · Record 8s</Text>}
+            </Pressable>
+
+            <Text style={styles.statusHelper}>{statusText}</Text>
+          </View>
+
+          {/* Result Card if available */}
+          {result && (
+            <View style={[styles.compactResultCard, { borderColor: verdictColor }]}>
+              <View style={[styles.resultTopBar, { backgroundColor: verdictColor }]}>
+                <Text style={styles.resultTopBarText}>{result.verdict.toUpperCase()} · SIMILARITY: {result.kyc_similarity?.toFixed(3) ?? '—'}</Text>
+              </View>
+              <Text style={[styles.speakerVerdictText, { color: speakerVerdict.color }]}>{speakerVerdict.label}</Text>
+              <Text style={styles.resultReason}>{speakerVerdict.description}</Text>
+            </View>
+          )}
+
+          {/* Screen 1 Bottom Navigation CTA */}
+          <View style={styles.screenBottomNav}>
+            <Pressable
+              onPress={() => setCurrentScreen('hardware_gps')}
+              style={styles.nextScreenBtn}
+            >
+              <Text style={styles.nextScreenBtnText}>Next: 2. Hardware & GPS Controls →</Text>
             </Pressable>
           </View>
         </View>
-      </Modal>
+      )}
+
+      {/* =================================================================== */}
+      {/* SCREEN 2: HARDWARE & GPS CONTROLS — STRICTLY NON-SCROLLABLE        */}
+      {/* =================================================================== */}
+      {currentScreen === 'hardware_gps' && (
+        <View style={styles.nonScrollablePage}>
+          <View style={styles.headerRow}>
+            <Text style={styles.eyebrow}>STEP 2: TELEMETRY & HARDWARE</Text>
+            <View style={[styles.badge, isMockLocation ? styles.badgeDanger : styles.badgeSuccess]}>
+              <Text style={[styles.badgeText, isMockLocation ? styles.badgeTextDanger : styles.badgeTextSuccess]}>
+                {isMockLocation ? 'SPOOFED GPS' : 'NORMAL GPS'}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.title}>Hardware & GPS</Text>
+          <Text style={styles.subtitle}>
+            Simulate sudden location jumps or rogue device IDs. Instant alerts are dispatched to the dashboard.
+          </Text>
+
+          {/* Status Details Card */}
+          <View style={styles.compactCard}>
+            <View style={styles.telemetryRow}>
+              <View style={styles.telemetryCol}>
+                <Text style={styles.metricLabel}>LOCATION</Text>
+                <Text style={styles.telemetryValue} numberOfLines={1}>{locationLabel}</Text>
+                <Text style={styles.subtext}>{coordinates.lat.toFixed(4)}° N, {coordinates.lon.toFixed(4)}° E</Text>
+              </View>
+              <View style={styles.telemetryCol}>
+                <Text style={styles.metricLabel}>VELOCITY</Text>
+                <Text style={[styles.telemetryValue, speedKmh > 100 && styles.telemetryValueDanger]}>
+                  {speedKmh.toFixed(1)} km/h
+                </Text>
+                <Text style={styles.subtext}>{speedKmh > 100 ? '⚡ Impossible Travel' : 'Road Transit'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.deviceRow}>
+              <Text style={styles.metricLabel}>HARDWARE DEVICE ID</Text>
+              <Text style={[styles.deviceIdText, isRogueDevice && styles.deviceIdTextDanger]}>{deviceId}</Text>
+            </View>
+          </View>
+
+          {/* Controls Card */}
+          <View style={styles.compactCard}>
+            <Text style={styles.compactCardLabel}>TRIGGER DASHBOARD ALERTS</Text>
+
+            <View style={styles.buttonRow}>
+              <Pressable
+                onPress={() => void handleSetCurrentLocation()}
+                style={[styles.locationBtn, styles.locationBtnNormal]}
+              >
+                <Text style={styles.locationBtnNormalText}>📍 Set Current Location</Text>
+                <Text style={styles.btnSub}>Normal GPS (24km/h)</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => void handleSetMockLocation()}
+                style={[styles.locationBtn, styles.locationBtnMock]}
+              >
+                <Text style={styles.locationBtnMockText}>⚡ Set Mock Location</Text>
+                <Text style={styles.btnSubDanger}>Sudden Leap (850km/h)</Text>
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => void handleToggleDeviceId()}
+              style={[styles.deviceToggleBtn, isRogueDevice && styles.deviceToggleBtnActive]}
+            >
+              <Text style={[styles.deviceToggleText, isRogueDevice && styles.deviceToggleTextActive]}>
+                {isRogueDevice ? '📱 Restore Genuine Device ID' : '📱 Switch to Rogue / Spoofed Device ID'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Alert Notification Card */}
+          {alertDispatched && (
+            <View style={[styles.alertBannerBox, isMockLocation || isRogueDevice ? styles.alertBannerDanger : styles.alertBannerSuccess]}>
+              <Text style={[styles.alertBannerText, isMockLocation || isRogueDevice ? styles.alertBannerTextDanger : styles.alertBannerTextSuccess]}>
+                {alertDispatched}
+              </Text>
+            </View>
+          )}
+
+          {/* Screen 2 Bottom Navigation CTA */}
+          <View style={styles.screenBottomNavRow}>
+            <Pressable
+              onPress={() => setCurrentScreen('call_customer')}
+              style={styles.backScreenBtn}
+            >
+              <Text style={styles.backScreenBtnText}>← 1. Call Customer</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setCurrentScreen('complete_delivery')}
+              style={styles.forwardScreenBtn}
+            >
+              <Text style={styles.forwardScreenBtnText}>3. Complete Delivery →</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* =================================================================== */}
+      {/* SCREEN 3: COMPLETE DELIVERY — STRICTLY NON-SCROLLABLE              */}
+      {/* Slider is permanently pinned at bottom; position NEVER changes      */}
+      {/* =================================================================== */}
+      {currentScreen === 'complete_delivery' && (
+        <View style={styles.nonScrollablePage}>
+          <View style={styles.headerRow}>
+            <Text style={styles.eyebrow}>STEP 3: DROP-OFF COMPLETION</Text>
+            <View style={[styles.badge, sliderBaseline.isCustom ? styles.badgeSuccess : styles.badgeNeutral]}>
+              <Text style={[styles.badgeText, sliderBaseline.isCustom ? styles.badgeTextSuccess : styles.badgeTextNeutral]}>
+                {sliderBaseline.isCustom ? 'CUSTOM CALIBRATED' : 'DEFAULT BASELINE'}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.title}>Complete Delivery</Text>
+
+          {/* Compact Order Drop-off Card */}
+          <View style={styles.compactCard}>
+            <View style={styles.orderSummaryRow}>
+              <View>
+                <Text style={styles.customerName}>Pooja K. · Flat 402, Sea Breeze</Text>
+                <Text style={styles.orderItems}>2x Farmhouse Pizza · ₹420 Cashless Paid</Text>
+              </View>
+              <Pressable
+                onPress={() => setCurrentScreen('call_customer')}
+                style={styles.screenChangeLink}
+              >
+                <Text style={styles.screenChangeLinkText}>← Call Customer</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Slider Biometric Profile & Mode Card */}
+          <View style={styles.compactCard}>
+            <View style={styles.sliderProfileHeader}>
+              <Text style={styles.compactCardLabel}>BIOMETRIC PROFILE STATUS</Text>
+              <Pressable
+                onPress={() => {
+                  if (sliderMode === 'live') {
+                    setSliderMode('calibrate');
+                    setCalibrationStep(0);
+                    calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
+                    setSliderFeedback({
+                      type: 'calib',
+                      message: 'Calibration active: Swipe 1 of 3 across the slider below.',
+                    });
+                  } else {
+                    setSliderMode('live');
+                    setSliderFeedback(null);
+                  }
+                }}
+                style={[styles.calibrateToggleBtn, sliderMode === 'calibrate' && styles.calibrateToggleBtnActive]}
+              >
+                <Text style={[styles.calibrateToggleBtnText, sliderMode === 'calibrate' && styles.calibrateToggleBtnTextActive]}>
+                  {sliderMode === 'calibrate' ? '✕ Cancel Calibration' : '🎯 Calibrate (3 Swipes)'}
+                </Text>
+              </Pressable>
+            </View>
+
+            {sliderMode === 'calibrate' ? (
+              <View style={styles.calibrationStatusBox}>
+                <Text style={styles.calibTitle}>CALIBRATING BIOMETRIC SLIDER</Text>
+                <Text style={styles.calibInstruction}>
+                  Swipe naturally on the slider below. Hand posture and thumb joint angle are recorded.
+                </Text>
+                <View style={styles.stepPillRow}>
+                  {[0, 1, 2].map((step) => (
+                    <View
+                      key={step}
+                      style={[
+                        styles.stepPill,
+                        step === calibrationStep && styles.stepPillActive,
+                        step < calibrationStep && styles.stepPillCompleted,
+                      ]}
+                    >
+                      <Text style={styles.stepPillText}>
+                        {step < calibrationStep ? '✓ Done' : `Swipe ${step + 1}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View style={styles.baselineMetricsGrid}>
+                <View style={styles.baselineMetricCol}>
+                  <Text style={styles.metricLabel}>PITCH-PUSH</Text>
+                  <Text style={styles.baselineVal}>+{sliderBaseline.baselinePitchPush.toFixed(1)}°</Text>
+                </View>
+                <View style={styles.baselineMetricCol}>
+                  <Text style={styles.metricLabel}>SYMMETRY</Text>
+                  <Text style={styles.baselineVal}>{sliderBaseline.baselineSymmetry.toFixed(3)}</Text>
+                </View>
+                <View style={styles.baselineMetricCol}>
+                  <Text style={styles.metricLabel}>LIFTOFF HOOK</Text>
+                  <Text style={styles.baselineVal}>{sliderBaseline.baselineLiftoffVy.toFixed(3)}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Feedback Notification Box */}
+          {sliderFeedback && (
+            <View style={[
+              styles.feedbackBox,
+              sliderFeedback.type === 'error' && styles.feedbackBoxError,
+              sliderFeedback.type === 'success' && styles.feedbackBoxSuccess,
+              sliderFeedback.type === 'calib' && styles.feedbackBoxCalib,
+            ]}>
+              <Text style={[
+                styles.feedbackText,
+                sliderFeedback.type === 'error' && styles.feedbackTextError,
+                sliderFeedback.type === 'success' && styles.feedbackTextSuccess,
+                sliderFeedback.type === 'calib' && styles.feedbackTextCalib,
+              ]}>
+                {sliderFeedback.message}
+              </Text>
+            </View>
+          )}
+
+          {/* --------------------------------------------------------------- */}
+          {/* PERMANENT STATIC SLIDER AT SCREEN BOTTOM                        */}
+          {/* Position NEVER shifts between live and calibration modes        */}
+          {/* --------------------------------------------------------------- */}
+          <View style={styles.staticSliderAnchor}>
+            <Text style={styles.sliderInstruction}>
+              {sliderMode === 'calibrate'
+                ? `CALIBRATION MODE · SWIPE ${calibrationStep + 1} OF 3`
+                : 'SLIDE TO COMPLETE ORDER'}
+            </Text>
+
+            <View style={[styles.sliderTrack, sliderMode === 'calibrate' && styles.sliderTrackCalib]}>
+              <Text style={styles.sliderTrackText}>
+                {sliderMode === 'calibrate' ? 'Slide across to calibrate →' : 'Slide to Complete Delivery →'}
+              </Text>
+
+              <Animated.View
+                {...sliderPanResponder.panHandlers}
+                style={[
+                  styles.sliderThumb,
+                  sliderMode === 'calibrate' && styles.sliderThumbCalib,
+                  { transform: [{ translateX: panX }] },
+                ]}
+              >
+                <Text style={styles.sliderThumbText}>→</Text>
+              </Animated.View>
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Helpers & Subcomponents
+// Helpers
 // ---------------------------------------------------------------------------
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-    </View>
-  );
-}
-
-function formatScore(value: number | null | undefined) {
-  return value == null ? '—' : value.toFixed(3);
-}
-
 function getSpeakerVerdict(status: string, overallVerdict?: ApiResponse['verdict']) {
   if (overallVerdict === 'step_up') {
     return {
       label: 'UNCERTAIN · STEP-UP',
       description: status === 'warn'
-        ? 'Voice match is marginal. Review similarity and use in-app step-up.'
-        : 'Overall check needs step-up. Rider match is unconfirmed.',
+        ? 'Voice match is marginal. Use in-app step-up.'
+        : 'Overall check needs step-up. Rider unconfirmed.',
       color: '#a96800',
     };
   }
   if (status === 'passed') {
-    return { label: 'SAME SPEAKER LIKELY', description: 'Voice sample matches the enrolled 5-clip baseline.', color: '#147d53' };
+    return { label: 'SAME SPEAKER LIKELY', description: 'Voice matches enrolled baseline.', color: '#147d53' };
   }
   if (status === 'warn') {
-    return { label: 'UNCERTAIN · STEP-UP', description: 'Voice match is marginal. Review similarity and step-up.', color: '#a96800' };
+    return { label: 'UNCERTAIN · STEP-UP', description: 'Voice match marginal. Review similarity.', color: '#a96800' };
   }
   if (status === 'alert' || status === 'failed') {
-    return { label: 'VOICE MISMATCH SUSPECTED', description: 'Sample is below demo match threshold.', color: '#ba3038' };
+    return { label: 'VOICE MISMATCH SUSPECTED', description: 'Sample below match threshold.', color: '#ba3038' };
   }
-  return { label: 'NOT COMPARED', description: 'No enrolled KYC baseline was available for this rider.', color: '#526579' };
-}
-
-function layerColor(status: string) {
-  if (status === 'passed') return '#147d53';
-  if (status === 'alert' || status === 'failed') return '#ba3038';
-  if (status === 'warn') return '#a96800';
-  return '#526579';
+  return { label: 'NOT COMPARED', description: 'No enrolled KYC baseline available.', color: '#526579' };
 }
 
 // ---------------------------------------------------------------------------
-// Stylesheet
+// Stylesheet — Strict Non-Scrollable Layouts & Static Pinned Slider
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f1f5f9' },
+
+  // Fixed top navigation bar
   topNav: {
     flexDirection: 'row',
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
-    paddingHorizontal: 12,
-    paddingTop: 4,
+    paddingHorizontal: 8,
   },
   navTab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 11,
     alignItems: 'center',
     borderBottomWidth: 3,
     borderBottomColor: 'transparent',
@@ -1351,289 +1237,288 @@ const styles = StyleSheet.create({
     borderBottomColor: '#0f766e',
   },
   navTabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#64748b',
   },
   navTabTextActive: {
     color: '#0f766e',
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  page: { padding: 18, paddingBottom: 40 },
 
-  orderBadgeRow: {
+  // Strictly non-scrollable page container
+  nonScrollablePage: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 16,
+    position: 'relative',
+  },
+
+  headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#e0f2fe',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   greenDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#0284c7',
-    marginRight: 6,
+    marginRight: 5,
   },
   statusPillText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     color: '#0369a1',
     letterSpacing: 0.5,
   },
-  goToCompleteButton: {
-    backgroundColor: '#0f766e',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  goToCompleteButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  backButton: {
-    paddingVertical: 6,
-  },
-  backButtonText: {
-    color: '#0f766e',
-    fontSize: 13,
-    fontWeight: '800',
-  },
+
+  eyebrow: { color: '#0f766e', fontWeight: '800', letterSpacing: 1.2, fontSize: 10 },
+  title: { color: '#0f172a', fontSize: 22, fontWeight: '900', marginTop: 2, marginBottom: 4 },
+  subtitle: { color: '#64748b', fontSize: 11, lineHeight: 16, marginBottom: 8 },
 
   completedToast: {
     backgroundColor: '#ecfdf5',
     borderWidth: 1,
     borderColor: '#a7f3d0',
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 8,
+  },
+  completedToastTitle: { color: '#065f46', fontWeight: '900', fontSize: 12 },
+  completedToastSub: { color: '#047857', fontSize: 11, marginTop: 1 },
+
+  // Compact Cards
+  compactCard: {
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 12,
-    marginBottom: 14,
-  },
-  completedToastTitle: {
-    color: '#065f46',
-    fontWeight: '900',
-    fontSize: 13,
-  },
-  completedToastSub: {
-    color: '#047857',
-    fontSize: 12,
-    marginTop: 2,
-  },
-
-  eyebrow: { color: '#0f766e', fontWeight: '800', letterSpacing: 1.5, fontSize: 11, marginTop: 4 },
-  title: { color: '#0f172a', fontSize: 26, fontWeight: '900', marginTop: 4 },
-  subtitle: { color: '#475569', fontSize: 13, lineHeight: 19, marginTop: 4, marginBottom: 14 },
-
-  baselineStatusCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  baselineHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  baselineTitle: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#334155',
-    letterSpacing: 0.8,
-  },
-  baselineDetailText: {
-    fontSize: 12,
+  compactCardLabel: {
+    fontSize: 10,
+    fontWeight: '800',
     color: '#64748b',
-    lineHeight: 18,
+    letterSpacing: 0.6,
   },
+  compactCardVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+
   previousComparisonBox: {
     backgroundColor: '#f8fafc',
     borderLeftWidth: 3,
     borderLeftColor: '#0f766e',
-    padding: 9,
-    borderRadius: 6,
-    marginTop: 8,
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 6,
   },
-  previousComparisonLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#0f766e',
-    letterSpacing: 0.6,
-  },
-  previousComparisonValue: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginTop: 2,
-  },
-  previousComparisonSub: {
+  previousComparisonText: {
     fontSize: 11,
     color: '#334155',
-    marginTop: 2,
+  },
+  boldText: {
+    fontWeight: '800',
+    color: '#0f172a',
   },
 
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
   },
-  sectionHeader: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#1e293b',
-    letterSpacing: 0.8,
+  inputLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748b',
   },
-  label: { color: '#64748b', fontSize: 10, fontWeight: '800', letterSpacing: 1.1 },
-  input: {
-    color: '#0f172a',
+  compactInput: {
+    flex: 1,
     backgroundColor: '#f8fafc',
-    borderRadius: 10,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    marginTop: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
   },
-  button: {
+  shiftSlotText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0f766e',
+  },
+
+  buttonPrimary: {
     backgroundColor: '#0f766e',
-    borderRadius: 12,
-    marginTop: 14,
-    minHeight: 50,
+    borderRadius: 8,
+    paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 6,
+  },
+  buttonPrimaryText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 13,
   },
   buttonSecondary: {
     backgroundColor: '#ccfbf1',
-    borderRadius: 12,
-    marginTop: 12,
-    minHeight: 46,
+    borderRadius: 8,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  buttonSecondaryText: { color: '#0f766e', fontSize: 13, fontWeight: '800' },
-  buttonDisabled: { opacity: 0.55 },
-  buttonText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  status: { color: '#64748b', fontSize: 12, textAlign: 'center', marginTop: 10 },
-  helper: { color: '#64748b', fontSize: 11, lineHeight: 16, marginTop: 6 },
-
-  resultCard: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderRadius: 16,
-    marginTop: 14,
-    overflow: 'hidden',
-    paddingBottom: 14,
-    elevation: 2,
-  },
-  banner: { paddingVertical: 12, paddingHorizontal: 16 },
-  bannerText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.8 },
-  speakerVerdict: {
-    marginHorizontal: 14,
-    marginTop: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-  },
-  speakerVerdictText: { fontSize: 15, fontWeight: '900', marginTop: 3 },
-  metrics: { flexDirection: 'row', flexWrap: 'wrap', padding: 14, paddingBottom: 4 },
-  metric: { width: '50%', marginBottom: 10 },
-  metricLabel: { color: '#64748b', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  metricValue: { color: '#0f172a', fontWeight: '800', marginTop: 2, fontSize: 14 },
-  modelName: { color: '#334155', fontSize: 12, marginHorizontal: 14, marginTop: 4, marginBottom: 10 },
-  layerRow: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#e2e8f0', paddingHorizontal: 14, paddingVertical: 8 },
-  layerName: { color: '#1e293b', fontWeight: '800', fontSize: 12 },
-  layerReason: { color: '#64748b', fontSize: 11, lineHeight: 15, marginTop: 2 },
-
-  proceedCard: {
-    backgroundColor: '#f0fdf4',
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
-    borderRadius: 14,
-    padding: 14,
-    marginTop: 14,
-  },
-  proceedCardTitle: {
-    color: '#166534',
-    fontWeight: '900',
-    fontSize: 12,
-    letterSpacing: 0.6,
-  },
-  proceedCardSub: {
-    color: '#15803d',
+  buttonSecondaryText: {
+    color: '#0f766e',
+    fontWeight: '800',
     fontSize: 11,
-    marginTop: 2,
-    marginBottom: 10,
   },
-  proceedPrimaryButton: {
-    backgroundColor: '#16a34a',
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  statusHelper: {
+    fontSize: 10,
+    color: '#64748b',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+
+  compactResultCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    overflow: 'hidden',
+    paddingBottom: 8,
+    marginBottom: 8,
+  },
+  resultTopBar: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  resultTopBarText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
+  speakerVerdictText: {
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 6,
+    marginHorizontal: 10,
+  },
+  resultReason: {
+    fontSize: 10,
+    color: '#64748b',
+    marginHorizontal: 10,
+    marginTop: 2,
+  },
+
+  screenBottomNav: {
+    marginTop: 'auto',
+  },
+  nextScreenBtn: {
+    backgroundColor: '#0f766e',
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  proceedPrimaryButtonText: {
+  nextScreenBtnText: {
     color: '#fff',
-    fontWeight: '900',
+    fontWeight: '800',
     fontSize: 13,
   },
 
-  // Telemetry styles
-  telemetryGrid: {
+  screenBottomNavRow: {
     flexDirection: 'row',
-    marginTop: 10,
-    backgroundColor: '#f8fafc',
+    gap: 8,
+    marginTop: 'auto',
+  },
+  backScreenBtn: {
+    flex: 1,
+    backgroundColor: '#f1f5f9',
     borderRadius: 10,
-    padding: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  backScreenBtnText: {
+    color: '#475569',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  forwardScreenBtn: {
+    flex: 1,
+    backgroundColor: '#0f766e',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  forwardScreenBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+
+  // Screen 2 Telemetry styles
+  telemetryRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
   telemetryCol: {
     flex: 1,
   },
+  metricLabel: {
+    color: '#64748b',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   telemetryValue: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     color: '#0f172a',
-    marginTop: 2,
+    marginTop: 1,
   },
   telemetryValueDanger: {
     color: '#dc2626',
   },
   subtext: {
-    fontSize: 10,
+    fontSize: 9,
     color: '#64748b',
-    marginTop: 2,
+    marginTop: 1,
   },
   deviceRow: {
     marginTop: 8,
     backgroundColor: '#f8fafc',
-    padding: 10,
-    borderRadius: 8,
+    padding: 8,
+    borderRadius: 6,
   },
   deviceIdText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#334155',
-    marginTop: 2,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginTop: 1,
   },
   deviceIdTextDanger: {
     color: '#dc2626',
@@ -1642,13 +1527,12 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 12,
+    marginTop: 8,
   },
   locationBtn: {
     flex: 1,
-    borderRadius: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
+    borderRadius: 8,
+    paddingVertical: 10,
     alignItems: 'center',
   },
   locationBtnNormal: {
@@ -1659,7 +1543,7 @@ const styles = StyleSheet.create({
   locationBtnNormalText: {
     color: '#0369a1',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
   },
   locationBtnMock: {
     backgroundColor: '#fee2e2',
@@ -1669,27 +1553,27 @@ const styles = StyleSheet.create({
   locationBtnMockText: {
     color: '#b91c1c',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
   },
   btnSub: {
-    fontSize: 9,
+    fontSize: 8,
     color: '#0284c7',
-    marginTop: 2,
+    marginTop: 1,
   },
   btnSubDanger: {
-    fontSize: 9,
+    fontSize: 8,
     color: '#dc2626',
     fontWeight: '700',
-    marginTop: 2,
+    marginTop: 1,
   },
 
   deviceToggleBtn: {
-    marginTop: 10,
-    backgroundColor: '#f1f5f9',
+    marginTop: 8,
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    borderRadius: 10,
-    paddingVertical: 11,
+    borderRadius: 8,
+    paddingVertical: 9,
     alignItems: 'center',
   },
   deviceToggleBtnActive: {
@@ -1699,16 +1583,16 @@ const styles = StyleSheet.create({
   deviceToggleText: {
     color: '#334155',
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 11,
   },
   deviceToggleTextActive: {
     color: '#dc2626',
   },
 
   alertBannerBox: {
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 12,
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
     borderWidth: 1,
   },
   alertBannerDanger: {
@@ -1720,114 +1604,156 @@ const styles = StyleSheet.create({
     borderColor: '#86efac',
   },
   alertBannerText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
+  },
+  alertBannerTextDanger: {
     color: '#991b1b',
   },
+  alertBannerTextSuccess: {
+    color: '#166534',
+  },
 
-  // Slider Profile Card
-  sliderProfileName: {
+  // Screen 3 Complete Delivery styles
+  orderSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  customerName: {
     fontSize: 13,
     fontWeight: '800',
     color: '#0f172a',
-    marginTop: 4,
-    marginBottom: 8,
   },
-  sliderProfileGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    backgroundColor: '#f8fafc',
-    borderRadius: 10,
-    padding: 10,
-    gap: 8,
-  },
-  profileParam: {
-    width: '46%',
-  },
-  profileParamVal: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#1e293b',
+  orderItems: {
+    fontSize: 11,
+    color: '#64748b',
     marginTop: 2,
   },
-  enrollSliderBtn: {
-    backgroundColor: '#0f766e',
-    borderRadius: 10,
-    paddingVertical: 11,
+  screenChangeLink: {
+    padding: 4,
+  },
+  screenChangeLinkText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0f766e',
+  },
+
+  sliderProfileHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginBottom: 6,
   },
-  enrollSliderBtnText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 13,
-  },
-
-  failedMetricsBox: {
-    backgroundColor: '#fef2f2',
-    marginHorizontal: 14,
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 6,
-  },
-  failedMetricsTitle: {
-    color: '#991b1b',
-    fontWeight: '800',
-    fontSize: 11,
-    marginBottom: 4,
-  },
-  failedMetricItem: {
-    color: '#b91c1c',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-
-  sliderBannerBox: {
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  sliderBannerError: {
-    backgroundColor: '#fef2f2',
-  },
-  sliderBannerSuccess: {
-    backgroundColor: '#f0fdf4',
-  },
-  sliderBannerText: {
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'center',
-    color: '#1e293b',
-  },
-
-  // Pinned Bottom Slider Track
-  sliderContainerCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 20,
-    padding: 18,
-    marginTop: 10,
-    alignItems: 'center',
-  },
-  sliderPromptText: {
-    color: '#38bdf8',
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-  },
-  sliderSubPrompt: {
-    color: '#94a3b8',
-    fontSize: 11,
-    textAlign: 'center',
-    lineHeight: 15,
-    marginTop: 4,
-    marginBottom: 14,
+  calibrateToggleBtn: {
+    backgroundColor: '#e0f2fe',
     paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  calibrateToggleBtnActive: {
+    backgroundColor: '#fee2e2',
+  },
+  calibrateToggleBtnText: {
+    color: '#0369a1',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  calibrateToggleBtnTextActive: {
+    color: '#b91c1c',
+  },
+
+  baselineMetricsGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  baselineMetricCol: {
+    flex: 1,
+  },
+  baselineVal: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1e293b',
+    marginTop: 1,
+  },
+
+  calibrationStatusBox: {
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#99f6e4',
+    padding: 8,
+    borderRadius: 8,
+  },
+  calibTitle: {
+    color: '#0f766e',
+    fontWeight: '900',
+    fontSize: 11,
+  },
+  calibInstruction: {
+    color: '#115e59',
+    fontSize: 10,
+    marginTop: 1,
+    marginBottom: 6,
+  },
+  stepPillRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  stepPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: '#ccfbf1',
+  },
+  stepPillActive: {
+    backgroundColor: '#0f766e',
+  },
+  stepPillCompleted: {
+    backgroundColor: '#bbf7d0',
+  },
+  stepPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+
+  feedbackBox: {
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  feedbackBoxError: { backgroundColor: '#fef2f2' },
+  feedbackBoxSuccess: { backgroundColor: '#f0fdf4' },
+  feedbackBoxCalib: { backgroundColor: '#f0fdfa' },
+  feedbackText: { fontSize: 11, fontWeight: '800', textAlign: 'center' },
+  feedbackTextError: { color: '#b91c1c' },
+  feedbackTextSuccess: { color: '#166534' },
+  feedbackTextCalib: { color: '#0f766e' },
+
+  // -------------------------------------------------------------------------
+  // THE PERMANENT STATIC SLIDER ANCHOR
+  // Position NEVER shifts by 1 pixel regardless of mode
+  // -------------------------------------------------------------------------
+  staticSliderAnchor: {
+    position: 'absolute',
+    bottom: 24,
+    left: 18,
+    right: 18,
+    alignItems: 'center',
+  },
+  sliderInstruction: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0f766e',
+    letterSpacing: 1.1,
+    marginBottom: 8,
   },
   sliderTrack: {
     width: SLIDER_WIDTH,
     height: SLIDER_HEIGHT,
-    backgroundColor: '#1e293b',
-    borderRadius: 30,
+    backgroundColor: '#0f172a',
+    borderRadius: 28,
     justifyContent: 'center',
     paddingHorizontal: 4,
     overflow: 'hidden',
@@ -1835,49 +1761,44 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#334155',
   },
-  sliderTrackGlow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#0f766e',
-    opacity: 0.15,
+  sliderTrackCalib: {
+    borderColor: '#14b8a6',
+    backgroundColor: '#042f2e',
   },
-  sliderTrackLabel: {
+  sliderTrackText: {
     position: 'absolute',
     alignSelf: 'center',
     color: '#cbd5e1',
     fontWeight: '800',
-    fontSize: 14,
+    fontSize: 13,
     letterSpacing: 0.5,
   },
   sliderThumb: {
     width: SLIDER_THUMB_SIZE,
     height: SLIDER_THUMB_SIZE,
-    borderRadius: 25,
+    borderRadius: 24,
     backgroundColor: '#14b8a6',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#14b8a6',
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
     elevation: 4,
   },
-  sliderThumbIcon: {
+  sliderThumbCalib: {
+    backgroundColor: '#38bdf8',
+  },
+  sliderThumbText: {
     color: '#042f2e',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '900',
   },
 
   // Badges
   badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
     borderRadius: 6,
   },
   badgeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
   },
   badgeSuccess: { backgroundColor: '#dcfce7' },
@@ -1888,101 +1809,4 @@ const styles = StyleSheet.create({
   badgeTextDanger: { color: '#b91c1c' },
   badgeNeutral: { backgroundColor: '#f1f5f9' },
   badgeTextNeutral: { color: '#475569' },
-
-  // Calibration Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
-  },
-  modalTitle: {
-    color: '#0f766e',
-    fontWeight: '900',
-    fontSize: 14,
-    letterSpacing: 1,
-  },
-  modalStep: {
-    color: '#0f172a',
-    fontSize: 22,
-    fontWeight: '900',
-    marginTop: 4,
-  },
-  modalInstructions: {
-    color: '#64748b',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 17,
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  modalStepIndicatorRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
-  stepPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: '#f1f5f9',
-  },
-  stepPillActive: {
-    backgroundColor: '#ccfbf1',
-    borderWidth: 1,
-    borderColor: '#14b8a6',
-  },
-  stepPillCompleted: {
-    backgroundColor: '#dcfce7',
-  },
-  stepPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#334155',
-  },
-  modalSliderTrack: {
-    width: '100%',
-    height: SLIDER_HEIGHT,
-    backgroundColor: '#0f172a',
-    borderRadius: 30,
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    overflow: 'hidden',
-    position: 'relative',
-    marginBottom: 16,
-  },
-  modalTrackLabel: {
-    position: 'absolute',
-    alignSelf: 'center',
-    color: '#94a3b8',
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  modalCancelBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  modalCancelBtnText: {
-    color: '#64748b',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-
-  footnote: {
-    textAlign: 'center',
-    color: '#94a3b8',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 20,
-    paddingHorizontal: 20,
-  },
 });

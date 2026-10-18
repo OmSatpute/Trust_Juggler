@@ -369,3 +369,21 @@ Use this shared interface unless inspection by the other contributors reveals an
 - **Validation:**
   - `mobile`: `npx tsc --noEmit` passed with 0 errors.
   - `backend`: `python -m py_compile backend/app/main.py backend/app/speaker.py` passed with 0 errors.
+
+### 2026-10-18 — Non-Scrollable Separation, Static Bottom Slider & Dashboard HTML Integration
+
+- **Author/laptop:** Antigravity / current project laptop.
+- **Changed:**
+  - `mobile/App.tsx`: Separated mobile app into 3 dedicated, strictly non-scrollable pages (`1. Call Customer`, `2. Hardware & GPS`, `3. Complete Delivery`) with zero `<ScrollView>`. Pinned the biometric slider at `position: 'absolute', bottom: 24, left: 18, right: 18` so its physical screen position never changes by even 1 pixel during live order completion or 3-swipe biometric enrollment/calibration. Calibration mode switches in-place on the exact same static track.
+  - `mobile/.env`: Configured `EXPO_PUBLIC_API_BASE_URL=http://10.180.142.251:8000` to match the current laptop LAN Wi-Fi IP.
+  - `dashboard/index.html`: Wired `load()` to dynamically resolve the API origin across both HTTP server (`/api/v1/dashboard`) and direct local `file://` browser access (`http://localhost:8000`).
+  - `backend/app/main.py`: Added in-memory `_dashboard_events` log and `GET /api/v1/dashboard?limit=200` endpoint matching the exact schema for `dashboard/index.html` (`signal`: `context` | `swipe` | `voice`, `status`, `severity`, `detail`, `total_checks`, `alerts`, `needs_review`, `riders_with_concerns`, `signal_counts`). Added `GET /dashboard` route serving `dashboard/index.html`. Linked mock location, device spoofing, slider calibration, and swipe completion to emit dashboard events. Fixed `rider_id` body extraction in `/api/telemetry`.
+  - Environment: Installed Python 3.13 via standalone `uv` and updated `.venv/pyvenv.cfg` to resolve the machine path mismatch, starting FastAPI with `--reload` on port 8000.
+- **Behavior:**
+  - Screen 1 (`Call Customer`): Single non-scrollable view with 5-clip voice baseline status, persistent baseline comparison metrics, and Call Customer audio verification.
+  - Screen 2 (`Hardware & GPS`): Dedicated telemetry screen with `📍 Set Current Location` (resets to normal), `⚡ Set Mock Location` (triggers 850 km/h teleport alert to dashboard), and `📱 Switch Device ID` (triggers device spoofing alert).
+  - Screen 3 (`Complete Delivery`): Order summary and pinned bottom slider. Tapping `🎯 Calibrate (3 Swipes)` enables enrollment mode on the exact same static track. Swiping successfully in live mode verifies kinetic envelopes, logs a verified swipe event to the dashboard, and navigates back to Screen 1.
+- **Validation:**
+  - `npx tsc --noEmit` passed with 0 errors.
+  - FastAPI server running on `http://0.0.0.0:8000` with `/health`, `/dashboard`, `/api/v1/dashboard`, and `/api/telemetry` verified via PowerShell `Invoke-RestMethod`.
+

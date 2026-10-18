@@ -582,6 +582,7 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
                 body = {}
 
     trigger = str(body.get("trigger_event", body.get("event_type", "")))
+    rider_id = str(body.get("rider_id", "rider-demo-01"))
     stage1 = body.get("stage_1_network_gps", {})
     slider = body.get("stage_3_slider", {})
 
