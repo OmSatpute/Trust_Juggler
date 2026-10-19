@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Pickup Verify",
+    "slug": "pickup-verify",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Pickup Verify to scan a delivery partner at pickup.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-status-bar"
+    ],
+    "android": {
+      "package": "com.hackforge.pickupverify"
+    },
+    "ios": {
+      "bundleIdentifier": "com.hackforge.pickupverify",
+      "supportsTablet": true
+    }
+  }
+}

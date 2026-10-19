@@ -4,13 +4,17 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   Vibration,
   View,
 } from 'react-native';
@@ -23,6 +27,7 @@ import {
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { DeviceMotion, DeviceMotionMeasurement } from 'expo-sensors';
+import * as Location from 'expo-location';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -98,7 +103,7 @@ export interface LiveSliderMetrics {
 // ---------------------------------------------------------------------------
 // Configuration & Defaults
 // ---------------------------------------------------------------------------
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://10.180.142.251:8000').replace(/\/$/, '');
+const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://10.125.167.120:8000').replace(/\/$/, '');
 const BATCH_SAMPLE_COUNT = 5;
 const BATCH_CAPTURE_MS = 8_000;
 const ENROLLMENT_CAPTURE_MS = 10_000;
@@ -139,10 +144,10 @@ const DEFAULT_SLIDER_BASELINE: SliderBaselineProfile = {
   baselinePitchPush: 2.1,
   pitchPushEnvelope: { min: 1.2, max: 3.1, margin: 1.25, envMin: -0.05, envMax: 4.35, mean: 2.1 },
   baselineSymmetry: 0.375,
-  symmetryEnvelope: { min: 0.33, max: 0.42, margin: 0.08, envMin: 0.25, envMax: 0.50, mean: 0.375 },
+  symmetryEnvelope: { min: 0.33, max: 0.42, margin: 0.06, envMin: 0.27, envMax: 0.48, mean: 0.375 },
   baselineLiftoffVy: -0.320,
-  liftoffVyEnvelope: { min: -0.55, max: -0.15, margin: 0.25, envMin: -0.80, envMax: 0.10, mean: -0.320 },
-  calibratedAt: 'Enrolled KYC Baseline',
+  liftoffVyEnvelope: { min: -0.55, max: -0.15, margin: 0.20, envMin: -0.75, envMax: 0.05, mean: -0.320 },
+  calibratedAt: 'Enrolled KYC Baseline (Rider-01)',
   isCustom: false,
 };
 
@@ -175,11 +180,14 @@ export default function App() {
   // Screen 2: Hardware & GPS state
   const [isMockLocation, setIsMockLocation] = useState(false);
   const [isRogueDevice, setIsRogueDevice] = useState(false);
+  const [isIpChanged, setIsIpChanged] = useState(false);
   const [locationLabel, setLocationLabel] = useState('Bandra West, Mumbai (Authentic)');
   const [coordinates, setCoordinates] = useState({ lat: 19.1031, lon: 72.8402 });
   const [speedKmh, setSpeedKmh] = useState(24.5);
   const [deviceId, setDeviceId] = useState('SM-G998B_Android_14_OEM');
+  const [ipAddress, setIpAddress] = useState('10.125.167.146 (Cellular LTE)');
   const [alertDispatched, setAlertDispatched] = useState<string | null>(null);
+  const [alertSeverity, setAlertSeverity] = useState<'normal' | 'warn' | 'alert'>('normal');
   const [orderCompletedBanner, setOrderCompletedBanner] = useState(false);
 
   // Screen 3: Slider Biometrics State & STATIC SLIDER
@@ -197,6 +205,16 @@ export default function App() {
     liftoffs: number[];
   }>({ curves: [], pitches: [], symmetries: [], liftoffs: [] });
 
+  // Synchronized refs to eliminate React stale closures in PanResponder
+  const sliderModeRef = useRef(sliderMode);
+  sliderModeRef.current = sliderMode;
+
+  const calibrationStepRef = useRef(calibrationStep);
+  calibrationStepRef.current = calibrationStep;
+
+  const sliderBaselineRef = useRef(sliderBaseline);
+  sliderBaselineRef.current = sliderBaseline;
+
   // Pinned Bottom Slider Pan & Trajectory
   const panX = useRef(new Animated.Value(0)).current;
   const startYRef = useRef(0);
@@ -204,12 +222,90 @@ export default function App() {
   const smoothYRef = useRef<number | null>(null);
   const trajectoryRef = useRef<{ progress: number; relY: number; time: number; pitch: number }[]>([]);
 
-  // IMU sensor readings
-  const currentPitchRef = useRef(2.1);
+  // ── High-Fidelity Google Pay Tick Mark Animation (Parity with face_app) ──
+  const [deliverySuccessVisible, setDeliverySuccessVisible] = useState(false);
+  const [isForceCompleted, setIsForceCompleted] = useState(false);
+  const checkScaleAnim = useRef(new Animated.Value(0)).current;
+  const ripple1Anim = useRef(new Animated.Value(0)).current;
+  const ripple2Anim = useRef(new Animated.Value(0)).current;
+  const cardSlideAnim = useRef(new Animated.Value(40)).current;
+  const cardFadeAnim = useRef(new Animated.Value(0)).current;
+  const successDismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const dismissDeliverySuccessModal = useCallback(() => {
+    if (successDismissTimeoutRef.current) {
+      clearTimeout(successDismissTimeoutRef.current);
+      successDismissTimeoutRef.current = null;
+    }
+    setDeliverySuccessVisible(false);
+    setIsForceCompleted(false);
+    panX.setValue(0);
+    setCurrentScreen('call_customer');
+    setOrderCompletedBanner(true);
+  }, [panX]);
+
+  const playDeliverySuccessAnimation = useCallback(() => {
+    setDeliverySuccessVisible(true);
+    Vibration.vibrate([0, 50, 40, 100]);
+    checkScaleAnim.setValue(0);
+    ripple1Anim.setValue(0);
+    ripple2Anim.setValue(0);
+    cardSlideAnim.setValue(40);
+    cardFadeAnim.setValue(0);
+
+    Animated.parallel([
+      // Primary Bouncy Checkmark Pop
+      Animated.spring(checkScaleAnim, {
+        toValue: 1,
+        friction: 5,
+        tension: 110,
+        useNativeDriver: true,
+      }),
+      // Expanding Ripple 1
+      Animated.timing(ripple1Anim, {
+        toValue: 1,
+        duration: 1000,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      // Expanding Ripple 2 (Staggered)
+      Animated.sequence([
+        Animated.delay(180),
+        Animated.timing(ripple2Anim, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+      // Card Slide Up & Fade In
+      Animated.timing(cardSlideAnim, {
+        toValue: 0,
+        duration: 450,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardFadeAnim, {
+        toValue: 1,
+        duration: 450,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    if (successDismissTimeoutRef.current) clearTimeout(successDismissTimeoutRef.current);
+    successDismissTimeoutRef.current = setTimeout(() => {
+      dismissDeliverySuccessModal();
+    }, 3200);
+  }, [checkScaleAnim, ripple1Anim, ripple2Anim, cardSlideAnim, cardFadeAnim, dismissDeliverySuccessModal]);
+
+  // IMU sensor readings with 2nd-order cascaded low-pass filter (parity with trust-juggler-app)
   const isSensorInitRef = useRef(false);
+  const currentPitchRef = useRef(2.1);
+  const stage1PitchRef = useRef(2.1);
+  const stage2PitchRef = useRef(2.1);
 
   // -------------------------------------------------------------------------
-  // Sensor Initialization (expo-sensors DeviceMotion)
+  // Sensor Initialization (expo-sensors DeviceMotion) - 50 Hz Cascaded 2nd-Order LPF
   // -------------------------------------------------------------------------
   useEffect(() => {
     let sub: { remove: () => void } | null = null;
@@ -217,14 +313,19 @@ export default function App() {
       try {
         const available = await DeviceMotion.isAvailableAsync();
         if (available) {
-          DeviceMotion.setUpdateInterval(25);
+          DeviceMotion.setUpdateInterval(20); // 50 Hz sampling (parity with trust-juggler-app)
           sub = DeviceMotion.addListener((data: DeviceMotionMeasurement) => {
             const rawPitch = ((data.rotation?.beta ?? 0) * 180) / Math.PI;
             if (!isSensorInitRef.current) {
+              stage1PitchRef.current = rawPitch;
+              stage2PitchRef.current = rawPitch;
               currentPitchRef.current = rawPitch;
               isSensorInitRef.current = true;
             } else {
-              currentPitchRef.current = 0.25 * rawPitch + 0.75 * currentPitchRef.current;
+              // Cascaded 2nd-order Low-Pass Filter (alpha1 = 0.20, alpha2 = 0.25)
+              stage1PitchRef.current = 0.20 * rawPitch + 0.80 * stage1PitchRef.current;
+              stage2PitchRef.current = 0.25 * stage1PitchRef.current + 0.75 * stage2PitchRef.current;
+              currentPitchRef.current = stage2PitchRef.current;
             }
           });
         }
@@ -236,6 +337,52 @@ export default function App() {
       sub?.remove();
     };
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Nadaraya-Watson Gaussian Kernel Regression Helper (from trust-juggler-app)
+  // -------------------------------------------------------------------------
+  const getSmoothedCheckpoint = useCallback(
+    (
+      trajectory: { progress: number; relY: number; time: number; pitch: number }[],
+      targetProgress: number,
+      fallbackY: number,
+      fallbackTime: number,
+      fallbackPitch: number
+    ): { y: number; time: number; pitch: number } => {
+      if (trajectory.length === 0) {
+        return { y: fallbackY, time: fallbackTime, pitch: fallbackPitch };
+      }
+
+      const SIGMA = 0.08;
+      const TWO_SIGMA_SQ = 2 * SIGMA * SIGMA;
+
+      let weightSum = 0;
+      let ySum = 0;
+      let timeSum = 0;
+      let pitchSum = 0;
+
+      for (let i = 0; i < trajectory.length; i++) {
+        const pt = trajectory[i];
+        const dist = pt.progress - targetProgress;
+        const w = Math.exp(-(dist * dist) / TWO_SIGMA_SQ);
+        weightSum += w;
+        ySum += w * pt.relY;
+        timeSum += w * pt.time;
+        pitchSum += w * pt.pitch;
+      }
+
+      if (weightSum > 0.001) {
+        return {
+          y: Number((ySum / weightSum).toFixed(1)),
+          time: Math.round(timeSum / weightSum),
+          pitch: Number((pitchSum / weightSum).toFixed(2)),
+        };
+      }
+
+      return { y: fallbackY, time: fallbackTime, pitch: fallbackPitch };
+    },
+    []
+  );
 
   // -------------------------------------------------------------------------
   // Baseline Status Loading
@@ -286,9 +433,23 @@ export default function App() {
   // Telemetry & Alert Dispatcher (Sends to backend -> updates Dashboard HTML)
   // -------------------------------------------------------------------------
   const sendAlertToDashboard = async (
-    eventType: 'SUDDEN_LOCATION_CHANGE' | 'DEVICE_ID_CHANGE' | 'SLIDER_BIOMETRIC_FAIL' | 'SLIDER_BIOMETRIC_PASS' | 'SET_CURRENT_LOCATION' | 'SLIDER_CALIBRATION',
+    eventType: 'SUDDEN_LOCATION_CHANGE' | 'DEVICE_ID_CHANGE' | 'IP_ADDRESS_CHANGE' | 'SLIDER_BIOMETRIC_FAIL' | 'SLIDER_BIOMETRIC_PASS' | 'SET_CURRENT_LOCATION' | 'GET_CURRENT_GPS' | 'SLIDER_CALIBRATION' | 'FORCE_COMPLETE_DELIVERY',
     customData?: Record<string, unknown>
   ) => {
+    const sliderMetrics = (customData?.slider_metrics as LiveSliderMetrics | undefined) || lastSliderResult;
+    const stage3SliderPayload = (['SLIDER_BIOMETRIC_FAIL', 'SLIDER_BIOMETRIC_PASS'].includes(eventType) && sliderMetrics) ? {
+      curve: sliderMetrics.curve,
+      pitch_delta: sliderMetrics.pitchDelta,
+      symmetry_ratio: sliderMetrics.symmetryRatio,
+      liftoff_vy: sliderMetrics.liftoffVy,
+      is_rejected: sliderMetrics.isRejected,
+      confidence_pct: sliderMetrics.confidencePct,
+    } : (eventType === 'SLIDER_CALIBRATION' ? {
+      is_rejected: false,
+      confidence_pct: 99,
+      reason: '3-swipe kinetic baseline enrolled (Beta)',
+    } : null);
+
     const payload = {
       trigger_event: eventType,
       rider_id: riderId,
@@ -301,15 +462,10 @@ export default function App() {
         latitude: coordinates.lat,
         longitude: coordinates.lon,
         device_id: deviceId,
+        ip_address: ipAddress,
+        is_ip_changed: isIpChanged || eventType === 'IP_ADDRESS_CHANGE',
       },
-      stage_3_slider: lastSliderResult ? {
-        curve: lastSliderResult.curve,
-        pitch_delta: lastSliderResult.pitchDelta,
-        symmetry_ratio: lastSliderResult.symmetryRatio,
-        liftoff_vy: lastSliderResult.liftoffVy,
-        is_rejected: lastSliderResult.isRejected,
-        confidence_pct: lastSliderResult.confidencePct,
-      } : null,
+      stage_3_slider: stage3SliderPayload,
       ...customData,
     };
 
@@ -327,26 +483,72 @@ export default function App() {
   // -------------------------------------------------------------------------
   // Location & Hardware Controls
   // -------------------------------------------------------------------------
-  const handleSetCurrentLocation = async () => {
+  const handleGetCurrentGps = async () => {
     setIsMockLocation(false);
     setIsRogueDevice(false);
-    setLocationLabel('Bandra West, Mumbai (Authentic)');
-    setCoordinates({ lat: 19.1031, lon: 72.8402 });
-    setSpeedKmh(24.5);
+    setIsIpChanged(false);
     setDeviceId('SM-G998B_Android_14_OEM');
-    setAlertDispatched('✅ Current location & genuine device restored.');
-    Vibration.vibrate(35);
-    await sendAlertToDashboard('SET_CURRENT_LOCATION', {
-      stage_1_network_gps: {
-        is_impossible_travel: false,
-        mock_location_detected: false,
-        velocity_kmh: 24.5,
-        distance_km: 0.1,
-        latitude: 19.1031,
-        longitude: 72.8402,
-        device_id: 'SM-G998B_Android_14_OEM',
-      },
-    });
+    setIpAddress('10.125.167.146 (Cellular LTE)');
+    let lat = 19.1031;
+    let lon = 72.8402;
+    let label = 'Bandra West, Mumbai (Authentic)';
+    let speed = 24.5;
+    let mockedDetected = false;
+
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        lat = loc.coords.latitude;
+        lon = loc.coords.longitude;
+        speed = Math.max(12.0, (loc.coords.speed ?? 0) * 3.6);
+        mockedDetected = Boolean((loc.coords as any).mocked);
+        label = mockedDetected ? 'Mock GPS Provider Detected' : `Live Device GPS (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+      }
+    } catch {
+      // Fallback to authentic baseline coordinates
+    }
+
+    setCoordinates({ lat, lon });
+    setSpeedKmh(mockedDetected ? 850.0 : speed);
+    setLocationLabel(label);
+    setIsMockLocation(mockedDetected);
+
+    if (mockedDetected) {
+      setAlertSeverity('alert');
+      setAlertDispatched('🚨 Mock GPS Provider detected by OS! Alert sent to dashboard.');
+      Vibration.vibrate([0, 180, 80, 220]);
+      await sendAlertToDashboard('SUDDEN_LOCATION_CHANGE', {
+        stage_1_network_gps: {
+          is_impossible_travel: true,
+          mock_location_detected: true,
+          velocity_kmh: 850.0,
+          distance_km: 840.2,
+          latitude: lat,
+          longitude: lon,
+          device_id: 'SM-G998B_Android_14_OEM',
+          ip_address: '10.125.167.146',
+          is_ip_changed: false,
+        },
+      });
+    } else {
+      setAlertSeverity('normal');
+      setAlertDispatched('✅ Current GPS acquired (Authentic). Normal signal sent to dashboard.');
+      Vibration.vibrate(35);
+      await sendAlertToDashboard('SET_CURRENT_LOCATION', {
+        stage_1_network_gps: {
+          is_impossible_travel: false,
+          mock_location_detected: false,
+          velocity_kmh: speed,
+          distance_km: 0.1,
+          latitude: lat,
+          longitude: lon,
+          device_id: 'SM-G998B_Android_14_OEM',
+          ip_address: '10.125.167.146',
+          is_ip_changed: false,
+        },
+      });
+    }
   };
 
   const handleSetMockLocation = async () => {
@@ -354,7 +556,8 @@ export default function App() {
     setLocationLabel('Bengaluru Hub, Karnataka (SPOOFED LEAP)');
     setCoordinates({ lat: 12.9716, lon: 77.5946 });
     setSpeedKmh(850.0);
-    setAlertDispatched('🚨 Sudden Location Change: Teleport Alert Dispatched to Dashboard (850 km/h)!');
+    setAlertSeverity('alert');
+    setAlertDispatched('🚨 Sudden Location Change: Teleport Alert (850 km/h) sent to dashboard!');
     Vibration.vibrate([0, 180, 80, 220]);
     await sendAlertToDashboard('SUDDEN_LOCATION_CHANGE', {
       stage_1_network_gps: {
@@ -365,8 +568,40 @@ export default function App() {
         latitude: 12.9716,
         longitude: 77.5946,
         device_id: deviceId,
+        ip_address: ipAddress,
+        is_ip_changed: isIpChanged,
       },
     });
+  };
+
+  const handleSimulateIpChange = async () => {
+    const nextIp = !isIpChanged;
+    setIsIpChanged(nextIp);
+    const newIp = nextIp ? '185.220.101.5 (Datacenter Proxy/VPN)' : '10.125.167.146 (Cellular LTE)';
+    setIpAddress(newIp);
+    if (nextIp) {
+      setAlertSeverity('warn');
+      setAlertDispatched('⚠️ IP Changed: Datacenter Subnet detected. Warn signal sent to dashboard!');
+      Vibration.vibrate([0, 100, 60, 100]);
+      await sendAlertToDashboard('IP_ADDRESS_CHANGE', {
+        stage_1_network_gps: {
+          is_impossible_travel: isMockLocation,
+          mock_location_detected: isMockLocation,
+          velocity_kmh: speedKmh,
+          distance_km: 0.2,
+          latitude: coordinates.lat,
+          longitude: coordinates.lon,
+          device_id: deviceId,
+          ip_address: '185.220.101.5',
+          is_ip_changed: true,
+        },
+      });
+    } else {
+      setAlertSeverity('normal');
+      setAlertDispatched('✅ Genuine Carrier IP restored. Normal signal sent.');
+      Vibration.vibrate(30);
+      await sendAlertToDashboard('GET_CURRENT_GPS');
+    }
   };
 
   const handleToggleDeviceId = async () => {
@@ -375,7 +610,8 @@ export default function App() {
     const newId = nextRogue ? 'ROGUE_EMULATOR_SPOOF_X86_ROOT' : 'SM-G998B_Android_14_OEM';
     setDeviceId(newId);
     if (nextRogue) {
-      setAlertDispatched('⚠️ Alert Dispatched to Dashboard: Hardware Device ID Mismatch!');
+      setAlertSeverity('alert');
+      setAlertDispatched('🚨 Device Fingerprint Mismatch! Alert signal sent to dashboard!');
       Vibration.vibrate([0, 140, 80, 140]);
       await sendAlertToDashboard('DEVICE_ID_CHANGE', {
         stage_1_network_gps: {
@@ -386,12 +622,15 @@ export default function App() {
           latitude: coordinates.lat,
           longitude: coordinates.lon,
           device_id: newId,
+          ip_address: ipAddress,
+          is_ip_changed: isIpChanged,
         },
       });
     } else {
-      setAlertDispatched('✅ Genuine Device ID restored.');
+      setAlertSeverity('normal');
+      setAlertDispatched('✅ Genuine Device ID restored. Normal signal sent.');
       Vibration.vibrate(30);
-      await sendAlertToDashboard('SET_CURRENT_LOCATION');
+      await sendAlertToDashboard('GET_CURRENT_GPS');
     }
   };
 
@@ -532,47 +771,65 @@ export default function App() {
   };
 
   // -------------------------------------------------------------------------
-  // Biometric Gesture Calculation
+  // Biometric Gesture Calculation (Parity with trust-juggler-app)
   // -------------------------------------------------------------------------
   const processSwipeTrajectory = (
     trajectory: { progress: number; relY: number; time: number; pitch: number }[],
     totalDurationMs: number,
     rawVy: number,
-    baseline: SliderBaselineProfile
+    baseline: SliderBaselineProfile,
+    lastRelYParam?: number
   ): LiveSliderMetrics => {
     const lastPitch = currentPitchRef.current;
     const startTime = startTimeRef.current;
+    const endTime = startTime + totalDurationMs;
+    const lastRelY = lastRelYParam ?? (trajectory.length > 0 ? trajectory[trajectory.length - 1].relY : 0);
 
-    const getPointAt = (targetProgress: number, fallbackY: number): { y: number; time: number; pitch: number } => {
-      if (trajectory.length === 0) return { y: fallbackY, time: startTime + totalDurationMs * targetProgress, pitch: lastPitch };
-      const closePts = trajectory.filter((p) => Math.abs(p.progress - targetProgress) < 0.12);
-      if (closePts.length > 0) {
-        const avgY = closePts.reduce((s, p) => s + p.relY, 0) / closePts.length;
-        const avgTime = closePts.reduce((s, p) => s + p.time, 0) / closePts.length;
-        const avgPitch = closePts.reduce((s, p) => s + p.pitch, 0) / closePts.length;
-        return { y: Number(avgY.toFixed(1)), time: Math.round(avgTime), pitch: Number(avgPitch.toFixed(2)) };
-      }
-      return { y: fallbackY, time: Math.round(startTime + totalDurationMs * targetProgress), pitch: lastPitch };
-    };
-
-    const lastRelY = trajectory.length > 0 ? trajectory[trajectory.length - 1].relY : 0;
-    const cp05 = getPointAt(0.05, 0);
-    const cp25 = getPointAt(0.25, lastRelY * 0.25);
-    const cp50 = getPointAt(0.50, lastRelY * 0.50);
-    const cp75 = getPointAt(0.75, lastRelY * 0.75);
-    const cp100 = getPointAt(0.98, lastRelY);
+    // 1. Smoothed Checkpoints [y25, y50, y75, y100] via Nadaraya-Watson Gaussian Kernel Regression
+    const cp05 = getSmoothedCheckpoint(trajectory, 0.05, 0, startTime, lastPitch);
+    const cp25 = getSmoothedCheckpoint(
+      trajectory,
+      0.25,
+      lastRelY * 0.25,
+      startTime + totalDurationMs * 0.25,
+      lastPitch
+    );
+    const cp50 = getSmoothedCheckpoint(
+      trajectory,
+      0.5,
+      lastRelY * 0.5,
+      startTime + totalDurationMs * 0.5,
+      lastPitch
+    );
+    const cp75 = getSmoothedCheckpoint(
+      trajectory,
+      0.75,
+      lastRelY * 0.75,
+      startTime + totalDurationMs * 0.75,
+      lastPitch
+    );
+    const cp100 = getSmoothedCheckpoint(trajectory, 0.98, lastRelY, endTime, lastPitch);
 
     const liveCurve: [number, number, number, number] = [cp25.y, cp50.y, cp75.y, cp100.y];
-    const pitchDelta = Number((cp100.pitch - cp05.pitch).toFixed(2));
+
+    // 2. The 'Pitch-Push' Effect: tilt delta (cp100.pitch - cp05.pitch)
+    const pitchAtStart = cp05.pitch;
+    const pitchAtEnd = cp100.pitch;
+    const pitchDelta = Number((pitchAtEnd - pitchAtStart).toFixed(2));
+
+    // 3. Velocity Symmetry Ratio (MidpointTime / TotalTime)
     const midpointTime = Math.max(1, cp50.time - startTime);
     const symmetryRatio = Number((midpointTime / totalDurationMs).toFixed(3));
 
+    // 4. Terminal Thumb Hook: trajectory derivative with 30ms window + native vy (trust-juggler-app)
     let trajVy = 0;
     if (trajectory.length >= 2) {
-      const p1 = trajectory[trajectory.length - 1];
-      const p0 = trajectory[Math.max(0, trajectory.length - 3)];
-      const dt = Math.max(10, p1.time - p0.time);
-      trajVy = (p1.relY - p0.relY) / dt;
+      const lastPt = trajectory[trajectory.length - 1];
+      const recentPt =
+        trajectory.slice().reverse().find((p) => lastPt.time - p.time >= 30) ??
+        trajectory[0];
+      const dt = Math.max(10, lastPt.time - recentPt.time);
+      trajVy = (lastPt.relY - recentPt.relY) / dt;
     }
     const liftoffVy = Number((0.6 * trajVy + 0.4 * rawVy).toFixed(3));
 
@@ -599,27 +856,72 @@ export default function App() {
     const isLiftoffDivergence = vEnv.mean < -0.05 && liftoffVy > 0.08;
     const isLiftoffFailed = isLiftoffOutside || isLiftoffDivergence;
 
-    const isRejected = isCurveFailed || isPitchPushFailed || isSymmetryFailed || isLiftoffFailed;
-    const failureCount = (isCurveFailed ? 1 : 0) + (isPitchPushFailed ? 1 : 0) + (isSymmetryFailed ? 1 : 0) + (isLiftoffFailed ? 1 : 0);
+    const failureCount =
+      (isCurveFailed ? 1 : 0) +
+      (isPitchPushFailed ? 1 : 0) +
+      (isSymmetryFailed ? 1 : 0) +
+      (isLiftoffFailed ? 1 : 0);
+    const isRejected =
+      isCurveFailed || isPitchPushFailed || isSymmetryFailed || isLiftoffFailed;
 
     let confidencePct = 98;
-    if (failureCount === 1) confidencePct = 42;
+    if (failureCount === 1) confidencePct = 38;
     else if (failureCount === 2) confidencePct = 28;
-    else if (failureCount >= 3) confidencePct = 14;
+    else if (failureCount >= 3) confidencePct = 15;
 
     const failedMetrics: string[] = [];
-    if (isPitchPushFailed) failedMetrics.push(`Pitch-Push: ${pitchDelta}° [${pEnv.envMin}°..${pEnv.envMax}°]`);
-    if (isSymmetryFailed) failedMetrics.push(`Velocity Symmetry: ${symmetryRatio} [${sEnv.envMin}..${sEnv.envMax}]`);
-    if (isLiftoffFailed) failedMetrics.push(`Liftoff Hook: ${liftoffVy} [${vEnv.envMin}..${vEnv.envMax}]`);
-    if (isCurveFailed) failedMetrics.push(`Curve Checkpoints Failed: ${failedCurvePoints.length}/4 outside envelope`);
+    if (isPitchPushFailed) {
+      failedMetrics.push(
+        `Pitch-Push: ${pitchDelta}° [Allowed: ${pEnv.envMin}° to ${pEnv.envMax}°] -> FAIL`
+      );
+    }
+    if (isSymmetryFailed) {
+      failedMetrics.push(
+        `Velocity Symmetry: ${symmetryRatio} [Allowed: ${sEnv.envMin} to ${sEnv.envMax}] -> FAIL`
+      );
+    }
+    if (isLiftoffFailed) {
+      const reason = isLiftoffDivergence ? ' (Liftoff Divergence: missing upward hook)' : '';
+      failedMetrics.push(
+        `Thumb Hook: ${liftoffVy} [Allowed: ${vEnv.envMin} to ${vEnv.envMax}] -> FAIL${reason}`
+      );
+    }
+    if (isCurveFailed) {
+      const breachedStr = failedCurvePoints
+        .map(
+          (idx) =>
+            `CP#${idx + 1} (${liveCurve[idx]}px outside [${baseline.curveEnvelopes[idx].envMin} to ${baseline.curveEnvelopes[idx].envMax}px])`
+        )
+        .join(', ');
+      failedMetrics.push(`Thumb Curve: ${breachedStr} -> FAIL`);
+    }
+
+    if (isRejected) {
+      console.log('🚨 [SLIDER BIOMETRIC REJECT] Swipe outside envelope (SUSPECT)!', {
+        confidencePct,
+        failedMetrics,
+        pitchDelta,
+        symmetryRatio,
+        liftoffVy,
+        liveCurve,
+      });
+    } else {
+      console.log('✅ [SLIDER BIOMETRIC AUTHENTIC] Swipe matches enrolled envelope!', {
+        confidencePct,
+        pitchDelta,
+        symmetryRatio,
+        liftoffVy,
+        liveCurve,
+      });
+    }
 
     return {
       curve: liveCurve,
       curveCheckpointsPassed,
       failedCurvePoints,
       isCurveFailed,
-      pitchAtStart: cp05.pitch,
-      pitchAtEnd: cp100.pitch,
+      pitchAtStart,
+      pitchAtEnd,
       pitchDelta,
       isPitchPushFailed,
       midpointTimeMs: midpointTime,
@@ -636,7 +938,7 @@ export default function App() {
 
   // -------------------------------------------------------------------------
   // PERMANENT STATIC SLIDER PANRESPONDER (Both Live & Calibration Modes)
-  // Position NEVER shifts by 1 pixel between enrollment and completion
+  // Uses synchronized refs to eliminate React hook stale closures completely
   // -------------------------------------------------------------------------
   const sliderPanResponder = useRef(
     PanResponder.create({
@@ -671,15 +973,21 @@ export default function App() {
         const durationMs = Math.max(1, endTime - startTimeRef.current);
         const distanceX = Math.max(0, gesture.dx);
 
-        if (distanceX >= MAX_SLIDE * 0.72) {
+        if (distanceX >= MAX_SLIDE * 0.75) {
+          const currentMode = sliderModeRef.current;
+          const currentStep = calibrationStepRef.current;
+          const currentBaseline = sliderBaselineRef.current;
+
           // --- MODE 1: CALIBRATION SWIPE ---
-          if (sliderMode === 'calibrate') {
-            Vibration.vibrate(50);
+          if (currentMode === 'calibrate') {
+            Vibration.vibrate(55);
+            const lastRelY = gesture.moveY - startYRef.current;
             const metrics = processSwipeTrajectory(
               trajectoryRef.current,
               durationMs,
               gesture.vy ?? 0,
-              DEFAULT_SLIDER_BASELINE
+              DEFAULT_SLIDER_BASELINE,
+              lastRelY
             );
 
             calibrationSwipesRef.current.curves.push(metrics.curve);
@@ -687,17 +995,18 @@ export default function App() {
             calibrationSwipesRef.current.symmetries.push(metrics.symmetryRatio);
             calibrationSwipesRef.current.liftoffs.push(metrics.liftoffVy);
 
-            const nextStep = calibrationStep + 1;
+            const nextStep = currentStep + 1;
             panX.setValue(0);
 
             if (nextStep < 3) {
               setCalibrationStep(nextStep);
+              calibrationStepRef.current = nextStep;
               setSliderFeedback({
                 type: 'calib',
-                message: `Recorded Swipe ${nextStep}/3. Perform Swipe ${nextStep + 1} across the same slider.`,
+                message: `✅ Swipe ${nextStep}/3 recorded! Swipe ${nextStep + 1} across the slider now.`,
               });
             } else {
-              // 3 Calibration Swipes Complete! Generate new envelopes
+              // 3 Calibration Swipes Complete! Generate new envelopes with authentic precision
               const curves = calibrationSwipesRef.current.curves;
               const pitches = calibrationSwipesRef.current.pitches;
               const symms = calibrationSwipesRef.current.symmetries;
@@ -708,8 +1017,8 @@ export default function App() {
               const env2 = computeEnvelope(curves.map((c) => c[2]), 3.5);
               const env3 = computeEnvelope(curves.map((c) => c[3]), 3.5);
               const pEnv = computeEnvelope(pitches, 1.25);
-              const sEnv = computeEnvelope(symms, 0.08);
-              const vEnv = computeEnvelope(liftoffs, 0.25);
+              const sEnv = computeEnvelope(symms, 0.06);
+              const vEnv = computeEnvelope(liftoffs, 0.20);
 
               const newProfile: SliderBaselineProfile = {
                 name: `Custom Calibrated Profile (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
@@ -726,24 +1035,29 @@ export default function App() {
               };
 
               setSliderBaseline(newProfile);
+              sliderBaselineRef.current = newProfile;
               setSliderMode('live');
+              sliderModeRef.current = 'live';
               setCalibrationStep(0);
+              calibrationStepRef.current = 0;
               calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
               Vibration.vibrate([0, 100, 50, 150]);
               setSliderFeedback({
                 type: 'success',
-                message: '✅ New Slider Biometric Enrolled! Slider is now locked to your personal swipe dynamics.',
+                message: '🎯 Calibration Enrolled (Beta)! Live delivery slider is now matched to your kinetic profile.',
               });
               void sendAlertToDashboard('SLIDER_CALIBRATION');
             }
           }
           // --- MODE 2: LIVE DELIVERY COMPLETION ---
           else {
+            const lastRelY = gesture.moveY - startYRef.current;
             const metrics = processSwipeTrajectory(
               trajectoryRef.current,
               durationMs,
               gesture.vy ?? 0,
-              sliderBaseline
+              currentBaseline,
+              lastRelY
             );
             setLastSliderResult(metrics);
 
@@ -752,13 +1066,12 @@ export default function App() {
               Vibration.vibrate([0, 160, 80, 220]);
               setSliderFeedback({
                 type: 'error',
-                message: `⚠️ Biometric Mismatch (${metrics.confidencePct}% Confidence): Trajectory outside biological baseline!`,
+                message: `⚠️ Biometric Mismatch (${metrics.confidencePct}% Confidence): Trajectory deviated from calibrated baseline!`,
               });
               void sendAlertToDashboard('SLIDER_BIOMETRIC_FAIL', { slider_metrics: metrics });
               Animated.spring(panX, { toValue: 0, bounciness: 6, useNativeDriver: false }).start();
             } else {
-              // Biometric Verified! Complete Order & Return to Screen 1 (Call Customer)
-              Vibration.vibrate(70);
+              // Biometric Verified! Complete Order & Trigger GPay Success Tick Animation
               setSliderFeedback({
                 type: 'success',
                 message: `✅ Biometric Match (${metrics.confidencePct}% Confidence)! Order Completed.`,
@@ -770,11 +1083,7 @@ export default function App() {
                 duration: 140,
                 useNativeDriver: false,
               }).start(() => {
-                setTimeout(() => {
-                  panX.setValue(0);
-                  setCurrentScreen('call_customer');
-                  setOrderCompletedBanner(true);
-                }, 1000);
+                playDeliverySuccessAnimation();
               });
             }
           }
@@ -785,6 +1094,39 @@ export default function App() {
       },
     })
   ).current;
+
+  // -------------------------------------------------------------------------
+  // Force Complete Delivery Handler (Bypasses kinetic slider with override)
+  // -------------------------------------------------------------------------
+  const handleForceCompleteDelivery = useCallback(() => {
+    Alert.alert(
+      '⚡ Force Complete Delivery',
+      'Override biometric kinetic slider and mark order #HF-9402 as delivered (Manual supervisor / rider override)?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Force Complete ⚡',
+          style: 'destructive',
+          onPress: () => {
+            setIsForceCompleted(true);
+            Vibration.vibrate([0, 90, 50, 130]);
+            setSliderFeedback({
+              type: 'success',
+              message: '⚡ Delivery Force Completed (Authorized Manual Bypass)!',
+            });
+            void sendAlertToDashboard('FORCE_COMPLETE_DELIVERY');
+            Animated.timing(panX, {
+              toValue: MAX_SLIDE,
+              duration: 150,
+              useNativeDriver: false,
+            }).start(() => {
+              playDeliverySuccessAnimation();
+            });
+          },
+        },
+      ]
+    );
+  }, [panX, playDeliverySuccessAnimation]);
 
   // -------------------------------------------------------------------------
   // Speaker Verdict Styling
@@ -822,7 +1164,7 @@ export default function App() {
           style={[styles.navTab, currentScreen === 'complete_delivery' && styles.navTabActive]}
         >
           <Text style={[styles.navTabText, currentScreen === 'complete_delivery' && styles.navTabTextActive]}>
-            3. Complete Delivery
+            3. Complete Delivery (Beta)
           </Text>
         </Pressable>
       </View>
@@ -939,16 +1281,22 @@ export default function App() {
         <View style={styles.nonScrollablePage}>
           <View style={styles.headerRow}>
             <Text style={styles.eyebrow}>STEP 2: TELEMETRY & HARDWARE</Text>
-            <View style={[styles.badge, isMockLocation ? styles.badgeDanger : styles.badgeSuccess]}>
-              <Text style={[styles.badgeText, isMockLocation ? styles.badgeTextDanger : styles.badgeTextSuccess]}>
-                {isMockLocation ? 'SPOOFED GPS' : 'NORMAL GPS'}
+            <View style={[
+              styles.badge,
+              isMockLocation || isRogueDevice ? styles.badgeDanger : (isIpChanged ? styles.badgeWarn : styles.badgeSuccess)
+            ]}>
+              <Text style={[
+                styles.badgeText,
+                isMockLocation || isRogueDevice ? styles.badgeTextDanger : (isIpChanged ? styles.badgeTextWarn : styles.badgeTextSuccess)
+              ]}>
+                {isMockLocation || isRogueDevice ? 'SECURITY ALERT' : (isIpChanged ? 'IP WARNING' : 'AUTHENTIC & NORMAL')}
               </Text>
             </View>
           </View>
 
           <Text style={styles.title}>Hardware & GPS</Text>
           <Text style={styles.subtitle}>
-            Simulate sudden location jumps or rogue device IDs. Instant alerts are dispatched to the dashboard.
+            Test location telemetry, network IP anomalies, and device identity against the dashboard.
           </Text>
 
           {/* Status Details Card */}
@@ -969,47 +1317,77 @@ export default function App() {
             </View>
 
             <View style={styles.deviceRow}>
+              <Text style={styles.metricLabel}>SIGN-IN IP ADDRESS</Text>
+              <Text style={[styles.deviceIdText, isIpChanged ? styles.deviceIdTextWarn : styles.deviceIdTextSuccess]}>
+                {ipAddress}
+              </Text>
+            </View>
+
+            <View style={[styles.deviceRow, { marginTop: 6 }]}>
               <Text style={styles.metricLabel}>HARDWARE DEVICE ID</Text>
-              <Text style={[styles.deviceIdText, isRogueDevice && styles.deviceIdTextDanger]}>{deviceId}</Text>
+              <Text style={[styles.deviceIdText, isRogueDevice ? styles.deviceIdTextDanger : styles.deviceIdTextSuccess]}>
+                {deviceId}
+              </Text>
             </View>
           </View>
 
           {/* Controls Card */}
           <View style={styles.compactCard}>
-            <Text style={styles.compactCardLabel}>TRIGGER DASHBOARD ALERTS</Text>
+            <Text style={styles.compactCardLabel}>TRIGGER DASHBOARD SIGNALS</Text>
 
+            {/* Row 1: GPS Controls */}
             <View style={styles.buttonRow}>
               <Pressable
-                onPress={() => void handleSetCurrentLocation()}
+                onPress={() => void handleGetCurrentGps()}
                 style={[styles.locationBtn, styles.locationBtnNormal]}
               >
-                <Text style={styles.locationBtnNormalText}>📍 Set Current Location</Text>
-                <Text style={styles.btnSub}>Normal GPS (24km/h)</Text>
+                <Text style={styles.locationBtnNormalText}>📍 Get Current GPS</Text>
+                <Text style={styles.btnSub}>Normal Signal (Clear · 0)</Text>
               </Pressable>
 
               <Pressable
                 onPress={() => void handleSetMockLocation()}
                 style={[styles.locationBtn, styles.locationBtnMock]}
               >
-                <Text style={styles.locationBtnMockText}>⚡ Set Mock Location</Text>
-                <Text style={styles.btnSubDanger}>Sudden Leap (850km/h)</Text>
+                <Text style={styles.locationBtnMockText}>⚡ Mock GPS Leap</Text>
+                <Text style={styles.btnSubDanger}>Teleport · Alert (100)</Text>
               </Pressable>
             </View>
 
-            <Pressable
-              onPress={() => void handleToggleDeviceId()}
-              style={[styles.deviceToggleBtn, isRogueDevice && styles.deviceToggleBtnActive]}
-            >
-              <Text style={[styles.deviceToggleText, isRogueDevice && styles.deviceToggleTextActive]}>
-                {isRogueDevice ? '📱 Restore Genuine Device ID' : '📱 Switch to Rogue / Spoofed Device ID'}
-              </Text>
-            </Pressable>
+            {/* Row 2: Context Anomalies */}
+            <View style={[styles.buttonRow, { marginTop: 8 }]}>
+              <Pressable
+                onPress={() => void handleSimulateIpChange()}
+                style={[styles.locationBtn, isIpChanged ? styles.locationBtnWarnActive : styles.locationBtnWarn]}
+              >
+                <Text style={[styles.locationBtnWarnText, isIpChanged && styles.locationBtnWarnTextActive]}>
+                  {isIpChanged ? '🌐 Restore Carrier IP' : '🌐 Simulate IP Change'}
+                </Text>
+                <Text style={styles.btnSubWarn}>{isIpChanged ? 'Back to LTE Subnet' : 'VPN/Proxy · Warn (65)'}</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => void handleToggleDeviceId()}
+                style={[styles.locationBtn, isRogueDevice ? styles.locationBtnRogueActive : styles.locationBtnRogue]}
+              >
+                <Text style={[styles.locationBtnRogueText, isRogueDevice && styles.locationBtnRogueTextActive]}>
+                  {isRogueDevice ? '📱 Restore Device' : '📱 Rogue Device ID'}
+                </Text>
+                <Text style={styles.btnSubDanger}>{isRogueDevice ? 'Back to OEM Phone' : 'Fingerprint · Alert (100)'}</Text>
+              </Pressable>
+            </View>
           </View>
 
           {/* Alert Notification Card */}
           {alertDispatched && (
-            <View style={[styles.alertBannerBox, isMockLocation || isRogueDevice ? styles.alertBannerDanger : styles.alertBannerSuccess]}>
-              <Text style={[styles.alertBannerText, isMockLocation || isRogueDevice ? styles.alertBannerTextDanger : styles.alertBannerTextSuccess]}>
+            <View style={[
+              styles.alertBannerBox,
+              alertSeverity === 'alert' ? styles.alertBannerDanger : (alertSeverity === 'warn' ? styles.alertBannerWarn : styles.alertBannerSuccess)
+            ]}>
+              <Text style={[
+                styles.alertBannerText,
+                alertSeverity === 'alert' ? styles.alertBannerTextDanger : (alertSeverity === 'warn' ? styles.alertBannerTextWarn : styles.alertBannerTextSuccess)
+              ]}>
                 {alertDispatched}
               </Text>
             </View>
@@ -1027,7 +1405,7 @@ export default function App() {
               onPress={() => setCurrentScreen('complete_delivery')}
               style={styles.forwardScreenBtn}
             >
-              <Text style={styles.forwardScreenBtnText}>3. Complete Delivery →</Text>
+              <Text style={styles.forwardScreenBtnText}>3. Complete Delivery (Beta) →</Text>
             </Pressable>
           </View>
         </View>
@@ -1039,134 +1417,297 @@ export default function App() {
       {/* =================================================================== */}
       {currentScreen === 'complete_delivery' && (
         <View style={styles.nonScrollablePage}>
-          <View style={styles.headerRow}>
-            <Text style={styles.eyebrow}>STEP 3: DROP-OFF COMPLETION</Text>
-            <View style={[styles.badge, sliderBaseline.isCustom ? styles.badgeSuccess : styles.badgeNeutral]}>
-              <Text style={[styles.badgeText, sliderBaseline.isCustom ? styles.badgeTextSuccess : styles.badgeTextNeutral]}>
-                {sliderBaseline.isCustom ? 'CUSTOM CALIBRATED' : 'DEFAULT BASELINE'}
-              </Text>
-            </View>
-          </View>
-
-          <Text style={styles.title}>Complete Delivery</Text>
-
-          {/* Compact Order Drop-off Card */}
-          <View style={styles.compactCard}>
-            <View style={styles.orderSummaryRow}>
-              <View>
-                <Text style={styles.customerName}>Pooja K. · Flat 402, Sea Breeze</Text>
-                <Text style={styles.orderItems}>2x Farmhouse Pizza · ₹420 Cashless Paid</Text>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.headerRow}>
+              <Text style={styles.eyebrow}>STEP 3: DROP-OFF COMPLETION</Text>
+              <View style={[styles.badge, sliderBaseline.isCustom ? styles.badgeSuccess : styles.badgeNeutral]}>
+                <Text style={[styles.badgeText, sliderBaseline.isCustom ? styles.badgeTextSuccess : styles.badgeTextNeutral]}>
+                  {sliderBaseline.isCustom ? 'CUSTOM CALIBRATED' : 'DEFAULT BASELINE'}
+                </Text>
               </View>
-              <Pressable
-                onPress={() => setCurrentScreen('call_customer')}
-                style={styles.screenChangeLink}
-              >
-                <Text style={styles.screenChangeLinkText}>← Call Customer</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Slider Biometric Profile & Mode Card */}
-          <View style={styles.compactCard}>
-            <View style={styles.sliderProfileHeader}>
-              <Text style={styles.compactCardLabel}>BIOMETRIC PROFILE STATUS</Text>
-              <Pressable
-                onPress={() => {
-                  if (sliderMode === 'live') {
-                    setSliderMode('calibrate');
-                    setCalibrationStep(0);
-                    calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
-                    setSliderFeedback({
-                      type: 'calib',
-                      message: 'Calibration active: Swipe 1 of 3 across the slider below.',
-                    });
-                  } else {
-                    setSliderMode('live');
-                    setSliderFeedback(null);
-                  }
-                }}
-                style={[styles.calibrateToggleBtn, sliderMode === 'calibrate' && styles.calibrateToggleBtnActive]}
-              >
-                <Text style={[styles.calibrateToggleBtnText, sliderMode === 'calibrate' && styles.calibrateToggleBtnTextActive]}>
-                  {sliderMode === 'calibrate' ? '✕ Cancel Calibration' : '🎯 Calibrate (3 Swipes)'}
-                </Text>
-              </Pressable>
             </View>
 
-            {sliderMode === 'calibrate' ? (
-              <View style={styles.calibrationStatusBox}>
-                <Text style={styles.calibTitle}>CALIBRATING BIOMETRIC SLIDER</Text>
-                <Text style={styles.calibInstruction}>
-                  Swipe naturally on the slider below. Hand posture and thumb joint angle are recorded.
-                </Text>
-                <View style={styles.stepPillRow}>
-                  {[0, 1, 2].map((step) => (
-                    <View
-                      key={step}
-                      style={[
-                        styles.stepPill,
-                        step === calibrationStep && styles.stepPillActive,
-                        step < calibrationStep && styles.stepPillCompleted,
-                      ]}
+            <View style={styles.titleWithBadgeRow}>
+              <Text style={[styles.title, { marginTop: 0, marginBottom: 0 }]}>Complete Delivery</Text>
+              <View style={styles.betaBadge}>
+                <Text style={styles.betaBadgeText}>BETA</Text>
+              </View>
+            </View>
+
+            {/* Compact Order Drop-off Card */}
+            <View style={styles.compactCard}>
+              <View style={styles.orderSummaryRow}>
+                <View>
+                  <Text style={styles.customerName}>Pooja K. · Flat 402, Sea Breeze</Text>
+                  <Text style={styles.orderItems}>2x Farmhouse Pizza · ₹420 Cashless Paid</Text>
+                </View>
+                <Pressable
+                  onPress={() => setCurrentScreen('call_customer')}
+                  style={styles.screenChangeLink}
+                >
+                  <Text style={styles.screenChangeLinkText}>← Call Customer</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Slider Biometric Profile & Mode Card */}
+            <View style={styles.compactCard}>
+              <View style={styles.sliderProfileHeader}>
+                <Text style={styles.compactCardLabel}>BIOMETRIC PROFILE STATUS</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {sliderBaseline.isCustom && (
+                    <Pressable
+                      onPress={() => {
+                        setSliderBaseline(DEFAULT_SLIDER_BASELINE);
+                        sliderBaselineRef.current = DEFAULT_SLIDER_BASELINE;
+                        setSliderFeedback({
+                          type: 'calib',
+                          message: 'Reset to default Enrolled KYC Baseline (Rider-01).',
+                        });
+                        Vibration.vibrate(40);
+                      }}
+                      style={styles.calibrateToggleBtn}
                     >
-                      <Text style={styles.stepPillText}>
-                        {step < calibrationStep ? '✓ Done' : `Swipe ${step + 1}`}
-                      </Text>
-                    </View>
-                  ))}
+                      <Text style={styles.calibrateToggleBtnText}>↺ Reset Baseline</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    onPress={() => {
+                      if (sliderMode === 'live') {
+                        setSliderMode('calibrate');
+                        sliderModeRef.current = 'calibrate';
+                        setCalibrationStep(0);
+                        calibrationStepRef.current = 0;
+                        calibrationSwipesRef.current = { curves: [], pitches: [], symmetries: [], liftoffs: [] };
+                        setSliderFeedback({
+                          type: 'calib',
+                          message: 'Calibration active: Swipe 1 of 3 across the slider below.',
+                        });
+                      } else {
+                        setSliderMode('live');
+                        sliderModeRef.current = 'live';
+                        setCalibrationStep(0);
+                        calibrationStepRef.current = 0;
+                        setSliderFeedback(null);
+                      }
+                    }}
+                    style={[styles.calibrateToggleBtn, sliderMode === 'calibrate' && styles.calibrateToggleBtnActive]}
+                  >
+                    <Text style={[styles.calibrateToggleBtnText, sliderMode === 'calibrate' && styles.calibrateToggleBtnTextActive]}>
+                      {sliderMode === 'calibrate' ? '✕ Cancel' : '🎯 Calibrate'}
+                    </Text>
+                  </Pressable>
                 </View>
               </View>
-            ) : (
-              <View style={styles.baselineMetricsGrid}>
-                <View style={styles.baselineMetricCol}>
-                  <Text style={styles.metricLabel}>PITCH-PUSH</Text>
-                  <Text style={styles.baselineVal}>+{sliderBaseline.baselinePitchPush.toFixed(1)}°</Text>
+
+              {sliderMode === 'calibrate' ? (
+                <View style={styles.calibrationStatusBox}>
+                  <Text style={styles.calibTitle}>CALIBRATING BIOMETRIC SLIDER</Text>
+                  <Text style={styles.calibInstruction}>
+                    Swipe naturally on the slider below. Hand posture and thumb joint angle are recorded.
+                  </Text>
+                  <View style={styles.stepPillRow}>
+                    {[0, 1, 2].map((step) => (
+                      <View
+                        key={step}
+                        style={[
+                          styles.stepPill,
+                          step === calibrationStep && styles.stepPillActive,
+                          step < calibrationStep && styles.stepPillCompleted,
+                        ]}
+                      >
+                        <Text style={styles.stepPillText}>
+                          {step < calibrationStep ? '✓ Done' : `Swipe ${step + 1}`}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
                 </View>
-                <View style={styles.baselineMetricCol}>
-                  <Text style={styles.metricLabel}>SYMMETRY</Text>
-                  <Text style={styles.baselineVal}>{sliderBaseline.baselineSymmetry.toFixed(3)}</Text>
+              ) : (
+                <View style={styles.baselineMetricsGrid}>
+                  <View style={styles.baselineMetricCol}>
+                    <Text style={styles.metricLabel}>PITCH-PUSH</Text>
+                    <Text style={styles.baselineVal}>+{sliderBaseline.baselinePitchPush.toFixed(1)}°</Text>
+                  </View>
+                  <View style={styles.baselineMetricCol}>
+                    <Text style={styles.metricLabel}>SYMMETRY</Text>
+                    <Text style={styles.baselineVal}>{sliderBaseline.baselineSymmetry.toFixed(3)}</Text>
+                  </View>
+                  <View style={styles.baselineMetricCol}>
+                    <Text style={styles.metricLabel}>LIFTOFF HOOK</Text>
+                    <Text style={styles.baselineVal}>{sliderBaseline.baselineLiftoffVy.toFixed(3)}</Text>
+                  </View>
                 </View>
-                <View style={styles.baselineMetricCol}>
-                  <Text style={styles.metricLabel}>LIFTOFF HOOK</Text>
-                  <Text style={styles.baselineVal}>{sliderBaseline.baselineLiftoffVy.toFixed(3)}</Text>
+              )}
+            </View>
+
+            {/* Feedback Notification Box */}
+            {sliderFeedback && (
+              <View style={[
+                styles.feedbackBox,
+                sliderFeedback.type === 'error' && styles.feedbackBoxError,
+                sliderFeedback.type === 'success' && styles.feedbackBoxSuccess,
+                sliderFeedback.type === 'calib' && styles.feedbackBoxCalib,
+              ]}>
+                <Text style={[
+                  styles.feedbackText,
+                  sliderFeedback.type === 'error' && styles.feedbackTextError,
+                  sliderFeedback.type === 'success' && styles.feedbackTextSuccess,
+                  sliderFeedback.type === 'calib' && styles.feedbackTextCalib,
+                ]}>
+                  {sliderFeedback.message}
+                </Text>
+              </View>
+            )}
+
+            {/* ── Detailed Biometric Failure Diagnostics Card ── */}
+            {lastSliderResult && lastSliderResult.isRejected && (
+              <View style={styles.failureDiagnosticsCard}>
+                <View style={styles.failureDiagnosticsHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 13 }}>🚨</Text>
+                    <Text style={styles.failureDiagnosticsTitle}>BIOMETRIC TELEMETRY BREACH</Text>
+                  </View>
+                  <View style={styles.failureConfidenceBadge}>
+                    <Text style={styles.failureConfidenceText}>
+                      {lastSliderResult.confidencePct}% CONFIDENCE
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.failureDiagnosticsSubtitle}>
+                  Trajectory deviated from {sliderBaseline.isCustom ? 'custom calibrated baseline' : 'enrolled KYC baseline (Rider-01)'}.
+                </Text>
+
+                {/* 4 Metric Breakdown Rows */}
+                <View style={styles.diagnosticMetricsContainer}>
+                  {/* Metric 1: Thumb Arc Curve */}
+                  <View style={styles.diagnosticMetricRow}>
+                    <View style={styles.diagnosticMetricHeader}>
+                      <Text style={styles.diagnosticMetricName}>1. THUMB ARC CURVE</Text>
+                      <View style={[styles.diagStatusBadge, lastSliderResult.isCurveFailed ? styles.diagStatusFail : styles.diagStatusPass]}>
+                        <Text style={[styles.diagStatusText, lastSliderResult.isCurveFailed ? styles.diagStatusTextFail : styles.diagStatusTextPass]}>
+                          {lastSliderResult.isCurveFailed ? 'BREACH' : 'OPTIMAL'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.diagnosticMetricDetail}>
+                      {lastSliderResult.curveCheckpointsPassed}/4 checkpoints passed
+                    </Text>
+                    <Text style={styles.diagnosticMetricValues}>
+                      Live: [{lastSliderResult.curve.join(', ')}] px
+                    </Text>
+                    <Text style={styles.diagnosticMetricAllowed}>
+                      Envelopes: CP1 [{sliderBaseline.curveEnvelopes[0].envMin}..{sliderBaseline.curveEnvelopes[0].envMax}] · CP2 [{sliderBaseline.curveEnvelopes[1].envMin}..{sliderBaseline.curveEnvelopes[1].envMax}] · CP3 [{sliderBaseline.curveEnvelopes[2].envMin}..{sliderBaseline.curveEnvelopes[2].envMax}] · CP4 [{sliderBaseline.curveEnvelopes[3].envMin}..{sliderBaseline.curveEnvelopes[3].envMax}]
+                    </Text>
+                  </View>
+
+                  {/* Metric 2: Pitch-Push Tilt */}
+                  <View style={styles.diagnosticMetricRow}>
+                    <View style={styles.diagnosticMetricHeader}>
+                      <Text style={styles.diagnosticMetricName}>2. PITCH-PUSH (IMU TILT)</Text>
+                      <View style={[styles.diagStatusBadge, lastSliderResult.isPitchPushFailed ? styles.diagStatusFail : styles.diagStatusPass]}>
+                        <Text style={[styles.diagStatusText, lastSliderResult.isPitchPushFailed ? styles.diagStatusTextFail : styles.diagStatusTextPass]}>
+                          {lastSliderResult.isPitchPushFailed ? 'BREACH' : 'OPTIMAL'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.diagnosticMetricDetail}>
+                      Tilt delta: {lastSliderResult.pitchDelta > 0 ? '+' : ''}{lastSliderResult.pitchDelta}° (from {lastSliderResult.pitchAtStart.toFixed(1)}° to {lastSliderResult.pitchAtEnd.toFixed(1)}°)
+                    </Text>
+                    <Text style={styles.diagnosticMetricAllowed}>
+                      Allowed envelope: [{sliderBaseline.pitchPushEnvelope.envMin}° .. {sliderBaseline.pitchPushEnvelope.envMax}°]
+                    </Text>
+                  </View>
+
+                  {/* Metric 3: Velocity Symmetry */}
+                  <View style={styles.diagnosticMetricRow}>
+                    <View style={styles.diagnosticMetricHeader}>
+                      <Text style={styles.diagnosticMetricName}>3. VELOCITY SYMMETRY</Text>
+                      <View style={[styles.diagStatusBadge, lastSliderResult.isSymmetryFailed ? styles.diagStatusFail : styles.diagStatusPass]}>
+                        <Text style={[styles.diagStatusText, lastSliderResult.isSymmetryFailed ? styles.diagStatusTextFail : styles.diagStatusTextPass]}>
+                          {lastSliderResult.isSymmetryFailed ? 'BREACH' : 'OPTIMAL'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.diagnosticMetricDetail}>
+                      Symmetry ratio: {lastSliderResult.symmetryRatio} ({lastSliderResult.midpointTimeMs}ms / {lastSliderResult.totalTimeMs}ms)
+                    </Text>
+                    <Text style={styles.diagnosticMetricAllowed}>
+                      Allowed envelope: [{sliderBaseline.symmetryEnvelope.envMin} .. {sliderBaseline.symmetryEnvelope.envMax}]
+                    </Text>
+                  </View>
+
+                  {/* Metric 4: Thumb Hook (Liftoff Vy) */}
+                  <View style={styles.diagnosticMetricRow}>
+                    <View style={styles.diagnosticMetricHeader}>
+                      <Text style={styles.diagnosticMetricName}>4. THUMB HOOK (LIFTOFF)</Text>
+                      <View style={[styles.diagStatusBadge, lastSliderResult.isLiftoffFailed ? styles.diagStatusFail : styles.diagStatusPass]}>
+                        <Text style={[styles.diagStatusText, lastSliderResult.isLiftoffFailed ? styles.diagStatusTextFail : styles.diagStatusTextPass]}>
+                          {lastSliderResult.isLiftoffFailed ? 'BREACH' : 'OPTIMAL'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.diagnosticMetricDetail}>
+                      Terminal hook vy: {lastSliderResult.liftoffVy} px/ms
+                    </Text>
+                    <Text style={styles.diagnosticMetricAllowed}>
+                      Allowed envelope: [{sliderBaseline.liftoffVyEnvelope.envMin} .. {sliderBaseline.liftoffVyEnvelope.envMax}]
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Specific Failed Reasons Summary */}
+                {lastSliderResult.failedMetrics.length > 0 && (
+                  <View style={styles.failedReasonsBox}>
+                    <Text style={styles.failedReasonsTitle}>SPECIFIC DEVIATIONS:</Text>
+                    {lastSliderResult.failedMetrics.map((reason, idx) => (
+                      <Text key={idx} style={styles.failedReasonItem}>• {reason}</Text>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.forceCompleteErrorBtn}
+                      activeOpacity={0.85}
+                      onPress={handleForceCompleteDelivery}
+                    >
+                      <Text style={styles.forceCompleteErrorBtnText}>⚡ Force Complete Delivery (Supervisor Override)</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Guidance Tip & Clear Button */}
+                <View style={styles.diagFooterRow}>
+                  <Text style={styles.diagAdviceText}>
+                    💡 Tip: Swipe naturally with your thumb arc, or tap "🎯 Calibrate" above to train your personal profile.
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      setLastSliderResult(null);
+                      setSliderFeedback(null);
+                    }}
+                    style={styles.diagDismissBtn}
+                  >
+                    <Text style={styles.diagDismissBtnText}>✕ Dismiss</Text>
+                  </Pressable>
                 </View>
               </View>
             )}
-          </View>
+          </ScrollView>
 
-          {/* Feedback Notification Box */}
-          {sliderFeedback && (
-            <View style={[
-              styles.feedbackBox,
-              sliderFeedback.type === 'error' && styles.feedbackBoxError,
-              sliderFeedback.type === 'success' && styles.feedbackBoxSuccess,
-              sliderFeedback.type === 'calib' && styles.feedbackBoxCalib,
-            ]}>
-              <Text style={[
-                styles.feedbackText,
-                sliderFeedback.type === 'error' && styles.feedbackTextError,
-                sliderFeedback.type === 'success' && styles.feedbackTextSuccess,
-                sliderFeedback.type === 'calib' && styles.feedbackTextCalib,
-              ]}>
-                {sliderFeedback.message}
-              </Text>
-            </View>
-          )}
-
-          {/* --------------------------------------------------------------- */}
-          {/* PERMANENT STATIC SLIDER AT SCREEN BOTTOM                        */}
-          {/* Position NEVER shifts between live and calibration modes        */}
-          {/* --------------------------------------------------------------- */}
+          {/* PERMANENT STATIC SLIDER AT SCREEN BOTTOM */}
           <View style={styles.staticSliderAnchor}>
             <Text style={styles.sliderInstruction}>
               {sliderMode === 'calibrate'
                 ? `CALIBRATION MODE · SWIPE ${calibrationStep + 1} OF 3`
-                : 'SLIDE TO COMPLETE ORDER'}
+                : 'SLIDE TO COMPLETE ORDER (BETA)'}
             </Text>
 
             <View style={[styles.sliderTrack, sliderMode === 'calibrate' && styles.sliderTrackCalib]}>
               <Text style={styles.sliderTrackText}>
-                {sliderMode === 'calibrate' ? 'Slide across to calibrate →' : 'Slide to Complete Delivery →'}
+                {sliderMode === 'calibrate' ? 'Slide across to calibrate →' : 'Slide to Complete Delivery (Beta) →'}
               </Text>
 
               <Animated.View
@@ -1180,9 +1721,150 @@ export default function App() {
                 <Text style={styles.sliderThumbText}>→</Text>
               </Animated.View>
             </View>
+
+            {sliderMode !== 'calibrate' && (
+              <TouchableOpacity
+                style={styles.forceCompleteBtn}
+                activeOpacity={0.8}
+                onPress={handleForceCompleteDelivery}
+              >
+                <Text style={styles.forceCompleteBtnText}>⚡ Force Complete Delivery (Bypass)</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       )}
+
+      {/* ── High-Fidelity Google Pay Tick Mark Modal (Parity with face_app) ── */}
+      <Modal
+        visible={deliverySuccessVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissDeliverySuccessModal}
+      >
+        <View style={styles.gpayModalOverlay}>
+          <View style={styles.gpaySuccessCard}>
+            {/* Expanding Ripple 1 */}
+            <Animated.View
+              style={[
+                styles.gpayRipple,
+                {
+                  transform: [
+                    {
+                      scale: ripple1Anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.8, 1.7],
+                      }),
+                    },
+                  ],
+                  opacity: ripple1Anim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.65, 0],
+                  }),
+                },
+              ]}
+            />
+
+            {/* Expanding Ripple 2 (Staggered) */}
+            <Animated.View
+              style={[
+                styles.gpayRipple,
+                {
+                  transform: [
+                    {
+                      scale: ripple2Anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.8, 1.7],
+                      }),
+                    },
+                  ],
+                  opacity: ripple2Anim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.5, 0],
+                  }),
+                },
+              ]}
+            />
+
+            {/* Main Green Spring Checkmark Circle */}
+            <Animated.View
+              style={[
+                styles.gpayCircle,
+                {
+                  transform: [{ scale: checkScaleAnim }],
+                },
+              ]}
+            >
+              <Text style={styles.gpayCheckmark}>✓</Text>
+            </Animated.View>
+
+            {/* Header Title */}
+            <Text style={styles.gpayMainTitle}>ORDER DELIVERED</Text>
+
+            {/* Prominent Confidence Badge */}
+            <View style={styles.confidencePillBadge}>
+              <Text style={styles.confidencePillText}>
+                ✓ {lastSliderResult?.confidencePct ?? 98}% BIOMETRIC CONFIDENCE
+              </Text>
+            </View>
+
+            <Text style={styles.gpaySubtitle}>Pooja K. · #HF-9402 Handover Confirmed</Text>
+
+            {/* Animated Slide-Up Receipt Card */}
+            <Animated.View
+              style={[
+                styles.gpayDetailsCard,
+                {
+                  transform: [{ translateY: cardSlideAnim }],
+                  opacity: cardFadeAnim,
+                },
+              ]}
+            >
+              <View style={styles.gpayDetailRowBetween}>
+                <Text style={styles.gpayDetailLabel}>VERIFICATION STATUS</Text>
+                <View style={isForceCompleted ? styles.badgeOverride : styles.badgeAuthorized}>
+                  <Text style={isForceCompleted ? styles.badgeOverrideText : styles.badgeAuthorizedText}>
+                    {isForceCompleted ? 'FORCE OVERRIDE ⚡' : 'AUTHORIZED ✓'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.gpayDetailVal}>
+                {isForceCompleted
+                  ? 'Manual Supervisor / Rider Force Complete Authorized'
+                  : 'Biometric Slider Kinetics Confirmed • Biological Match'}
+              </Text>
+
+              <View style={styles.gpayDivider} />
+              <View style={styles.gpayDetailRowBetween}>
+                <Text style={styles.gpayDetailLabel}>ASSIGNED ORDER</Text>
+                <Text style={styles.gpayDetailValBold}>#HF-9402</Text>
+              </View>
+
+              <View style={styles.gpayDivider} />
+              <View style={styles.gpayDetailRowBetween}>
+                <Text style={styles.gpayDetailLabel}>PAYMENT METHOD</Text>
+                <Text style={styles.gpayDetailValBold}>₹420 Cashless Paid</Text>
+              </View>
+
+              <View style={styles.gpayDivider} />
+              <View style={styles.gpayDetailRowBetween}>
+                <Text style={styles.gpayDetailLabel}>TIMESTAMP</Text>
+                <Text style={styles.gpayDetailVal}>
+                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </Text>
+              </View>
+            </Animated.View>
+
+            <TouchableOpacity
+              style={styles.gpayDoneButton}
+              activeOpacity={0.85}
+              onPress={dismissDeliverySuccessModal}
+            >
+              <Text style={styles.gpayDoneButtonText}>Done · Next Delivery →</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1285,6 +1967,27 @@ const styles = StyleSheet.create({
 
   eyebrow: { color: '#0f766e', fontWeight: '800', letterSpacing: 1.2, fontSize: 10 },
   title: { color: '#0f172a', fontSize: 22, fontWeight: '900', marginTop: 2, marginBottom: 4 },
+  titleWithBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  betaBadge: {
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#93c5fd',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  betaBadgeText: {
+    color: '#1d4ed8',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
   subtitle: { color: '#64748b', fontSize: 11, lineHeight: 16, marginBottom: 8 },
 
   completedToast: {
@@ -1523,6 +2226,20 @@ const styles = StyleSheet.create({
   deviceIdTextDanger: {
     color: '#dc2626',
   },
+  deviceIdTextSuccess: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginTop: 1,
+  },
+  deviceIdTextWarn: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#d97706',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginTop: 1,
+  },
 
   buttonRow: {
     flexDirection: 'row',
@@ -1553,6 +2270,52 @@ const styles = StyleSheet.create({
   locationBtnMockText: {
     color: '#b91c1c',
     fontWeight: '800',
+    fontSize: 11,
+  },
+  locationBtnWarn: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  locationBtnWarnActive: {
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  locationBtnWarnText: {
+    color: '#b45309',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  locationBtnWarnTextActive: {
+    color: '#92400e',
+    fontWeight: '900',
+    fontSize: 11,
+  },
+  btnSubWarn: {
+    fontSize: 8,
+    color: '#b45309',
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  locationBtnRogue: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  locationBtnRogueActive: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  locationBtnRogueText: {
+    color: '#334155',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  locationBtnRogueTextActive: {
+    color: '#b91c1c',
+    fontWeight: '900',
     fontSize: 11,
   },
   btnSub: {
@@ -1599,6 +2362,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fef2f2',
     borderColor: '#f87171',
   },
+  alertBannerWarn: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fcd34d',
+  },
   alertBannerSuccess: {
     backgroundColor: '#f0fdf4',
     borderColor: '#86efac',
@@ -1609,6 +2376,9 @@ const styles = StyleSheet.create({
   },
   alertBannerTextDanger: {
     color: '#991b1b',
+  },
+  alertBannerTextWarn: {
+    color: '#92400e',
   },
   alertBannerTextSuccess: {
     color: '#166534',
@@ -1809,4 +2579,356 @@ const styles = StyleSheet.create({
   badgeTextDanger: { color: '#b91c1c' },
   badgeNeutral: { backgroundColor: '#f1f5f9' },
   badgeTextNeutral: { color: '#475569' },
+
+  // ── High-Fidelity Google Pay Tick Mark Modal Styles (Parity with face_app) ──
+  gpayModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  gpaySuccessCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#0f172a',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+    position: 'relative',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  gpayRipple: {
+    position: 'absolute',
+    top: 10,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(16, 185, 129, 0.45)',
+  },
+  gpayCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#10b981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10b981',
+    shadowOpacity: 0.8,
+    shadowRadius: 18,
+    elevation: 14,
+    marginBottom: 16,
+    zIndex: 2,
+  },
+  gpayCheckmark: {
+    color: '#ffffff',
+    fontSize: 52,
+    fontWeight: '900',
+    lineHeight: 60,
+  },
+  gpayMainTitle: {
+    color: '#f8fafc',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: 1.2,
+  },
+  confidencePillBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: '#10b981',
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  confidencePillText: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  gpaySubtitle: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  gpayDetailsCard: {
+    width: '100%',
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  gpayDetailRowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  gpayDetailLabel: {
+    color: '#94a3b8',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  gpayDetailVal: {
+    color: '#f8fafc',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  gpayDetailValBold: {
+    color: '#f8fafc',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  badgeAuthorized: {
+    backgroundColor: '#064e3b',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  badgeAuthorizedText: {
+    color: '#34d399',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  badgeOverride: {
+    backgroundColor: '#451a03',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  badgeOverrideText: {
+    color: '#fbbf24',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  forceCompleteBtn: {
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forceCompleteBtnText: {
+    color: '#dc2626',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  forceCompleteErrorBtn: {
+    marginTop: 10,
+    backgroundColor: '#dc2626',
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forceCompleteErrorBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  gpayDivider: {
+    height: 1,
+    backgroundColor: '#334155',
+    marginVertical: 8,
+  },
+  gpayDoneButton: {
+    width: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10b981',
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  gpayDoneButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+
+  // ── Detailed Biometric Failure Diagnostics Styles ──
+  failureDiagnosticsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#fca5a5',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  failureDiagnosticsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  failureDiagnosticsTitle: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#991b1b',
+    letterSpacing: 0.5,
+  },
+  failureConfidenceBadge: {
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#f87171',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  failureConfidenceText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#b91c1c',
+  },
+  failureDiagnosticsSubtitle: {
+    fontSize: 10,
+    color: '#64748b',
+    marginBottom: 8,
+  },
+  diagnosticMetricsContainer: {
+    gap: 6,
+    marginBottom: 8,
+  },
+  diagnosticMetricRow: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    padding: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#cbd5e1',
+  },
+  diagnosticMetricHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  diagnosticMetricName: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0f172a',
+    letterSpacing: 0.4,
+  },
+  diagStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  diagStatusPass: {
+    backgroundColor: '#dcfce7',
+  },
+  diagStatusFail: {
+    backgroundColor: '#fee2e2',
+  },
+  diagStatusText: {
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  diagStatusTextPass: {
+    color: '#15803d',
+  },
+  diagStatusTextFail: {
+    color: '#b91c1c',
+  },
+  diagnosticMetricDetail: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  diagnosticMetricValues: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#475569',
+    marginTop: 1,
+  },
+  diagnosticMetricAllowed: {
+    fontSize: 9,
+    color: '#64748b',
+    marginTop: 1,
+  },
+  failedReasonsBox: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 6,
+    padding: 6,
+    marginBottom: 8,
+  },
+  failedReasonsTitle: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#991b1b',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  failedReasonItem: {
+    fontSize: 9,
+    color: '#b91c1c',
+    fontWeight: '700',
+    lineHeight: 13,
+  },
+  diagFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
+  diagAdviceText: {
+    flex: 1,
+    fontSize: 9,
+    color: '#64748b',
+    fontStyle: 'italic',
+    lineHeight: 12,
+  },
+  diagDismissBtn: {
+    backgroundColor: '#f1f5f9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  diagDismissBtnText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#475569',
+  },
 });

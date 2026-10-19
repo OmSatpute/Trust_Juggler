@@ -38,10 +38,20 @@ class PendingVoiceBatch:
 _batch_lock = Lock()
 _pending_batches: dict[str, PendingVoiceBatch] = {}
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="Rider Voice Verification API",
     version="0.1.0",
     description="Offline speaker verification with five-clip enrollment and ECAPA-TDNN embeddings.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -586,15 +596,46 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
     stage1 = body.get("stage_1_network_gps", {})
     slider = body.get("stage_3_slider", {})
 
-    is_mock = bool(stage1.get("is_impossible_travel") or stage1.get("mock_location_detected") or trigger == "MOCK_LOCATION")
+    is_mock = bool(stage1.get("is_impossible_travel") or stage1.get("mock_location_detected") or trigger in ("MOCK_LOCATION", "SUDDEN_LOCATION_CHANGE"))
     device_id = str(stage1.get("device_id", ""))
     is_device_changed = bool("SPOOF" in device_id or "EMULATOR" in device_id or trigger == "DEVICE_ID_CHANGE")
-    is_slider_failed = bool(slider.get("is_rejected") or trigger == "SLIDER_BIOMETRIC_FAIL")
+    ip_addr = str(stage1.get("ip_address") or (request.client.host if request.client else "10.125.167.146"))
+    is_ip_changed = bool(stage1.get("is_ip_changed") or trigger == "IP_ADDRESS_CHANGE" or "VPN" in ip_addr or "Proxy" in ip_addr or ip_addr.startswith("185.") or ip_addr.startswith("198."))
+    # Slider failure should ONLY be considered if it is a slider event!
+    is_slider_event = trigger in ("SLIDER_BIOMETRIC_FAIL", "SLIDER_BIOMETRIC_PASS", "SLIDE_FAIL", "COMPLETE_DELIVERY")
+    is_slider_failed = is_slider_event and bool(slider.get("is_rejected") or trigger in ("SLIDER_BIOMETRIC_FAIL", "SLIDE_FAIL"))
 
     timestamp_str = datetime.now(UTC).strftime("%H:%M:%S UTC")
 
-    # 1. Location anomaly / Mock Location
-    if is_mock or trigger in ("MOCK_LOCATION", "SUDDEN_LOCATION_CHANGE"):
+    # 1. Normal / Genuine reset (priority when user explicitly triggers Set/Get Current Location or Restore)
+    if trigger in ("SET_CURRENT_LOCATION", "GET_CURRENT_GPS", "RESTORE_GENUINE"):
+        _current_state["alertBanner"] = {
+            "active": True,
+            "title": "STATUS: AUTHENTICATED & OPTIMAL",
+            "message": "Continuous multi-modal verification running. All 5 security axes exceed 95% trust baseline.",
+            "level": "info",
+        }
+        _current_state["telemetry"]["gpsSpeed"]["mockLocationDetected"] = False
+        _current_state["telemetry"]["gpsSpeed"]["teleportFlag"] = False
+        _current_state["telemetry"]["gpsSpeed"]["speedKmh"] = float(stage1.get("velocity_kmh", 24.5))
+        _current_state["telemetry"]["gpsSpeed"]["status"] = "optimal"
+        for axis in _current_state["spiderweb_radar"]:
+            axis["status"] = "optimal"
+            axis["value"] = 96
+
+        record_dashboard_event(
+            rider_id=rider_id,
+            signal="context",
+            status="normal",
+            severity=0,
+            detail={
+                "changes": {"location_changed": False, "ip_changed": False, "device_id_changed": False},
+                "risk_flags": [],
+            },
+        )
+
+    # 2. Location anomaly / Mock Location
+    elif is_mock or trigger in ("MOCK_LOCATION", "SUDDEN_LOCATION_CHANGE"):
         speed_kmh = float(stage1.get("velocity_kmh", 850.0))
         dist_km = float(stage1.get("distance_km", 45.2))
         _current_state["telemetry"]["gpsSpeed"]["mockLocationDetected"] = True
@@ -624,12 +665,12 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
             status="alert",
             severity=100,
             detail={
-                "changes": {"location_changed": True, "device_id_changed": False},
+                "changes": {"location_changed": True, "ip_changed": False, "device_id_changed": False},
                 "risk_flags": ["IMPOSSIBLE_TRAVEL (850 km/h)", "MOCK_LOCATION_DETECTED"],
             },
         )
 
-    # 2. Hardware / Device ID mismatch
+    # 3. Hardware / Device ID mismatch -> Alert (100)
     elif is_device_changed or trigger == "DEVICE_ID_CHANGE":
         _current_state["weightOverrideActive"] = True
         _current_state["overall_trust_score"] = 89.2
@@ -650,7 +691,7 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
             "id": f"INC-{int(datetime.now(UTC).timestamp()) % 10000}",
             "timestamp": timestamp_str,
             "type": "Device DNA Mismatch",
-            "severity": "medium",
+            "severity": "critical",
             "detail": f"Hardware fingerprint changed to {device_id[:28]}. Weight rebalanced.",
         })
         record_dashboard_event(
@@ -659,12 +700,38 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
             status="alert",
             severity=100,
             detail={
-                "changes": {"location_changed": False, "device_id_changed": True},
+                "changes": {"location_changed": False, "ip_changed": False, "device_id_changed": True},
                 "risk_flags": ["DEVICE_FINGERPRINT_MISMATCH", f"ID: {device_id[:24]}"],
             },
         )
 
-    # 3. Slider Biometric Rejection
+    # 4. IP Address change -> Warn (65)
+    elif is_ip_changed or trigger == "IP_ADDRESS_CHANGE":
+        _current_state["alertBanner"] = {
+            "active": True,
+            "title": "⚠️ IP ADDRESS ANOMALY — NEW SUBNET DETECTED",
+            "message": f"Sign-in IP changed to {ip_addr}. Potential datacenter proxy, VPN, or unapproved network session.",
+            "level": "warning",
+        }
+        _current_state["incidentHistory"].insert(0, {
+            "id": f"INC-{int(datetime.now(UTC).timestamp()) % 10000}",
+            "timestamp": timestamp_str,
+            "type": "IP Address Mismatch",
+            "severity": "medium",
+            "detail": f"Sign-in IP changed to {ip_addr}. Subnet risk flagged.",
+        })
+        record_dashboard_event(
+            rider_id=rider_id,
+            signal="context",
+            status="warn",
+            severity=65,
+            detail={
+                "changes": {"location_changed": False, "ip_changed": True, "device_id_changed": False},
+                "risk_flags": ["IP_ADDRESS_CHANGED (Proxy / VPN Subnet)", f"IP: {ip_addr[:24]}"],
+            },
+        )
+
+    # 5. Slider Biometric Rejection
     elif is_slider_failed:
         _current_state["telemetry"]["sliderEnvelope"]["status"] = "breach"
         _current_state["telemetry"]["sliderEnvelope"]["envelopePercent"] = 28.0
@@ -698,46 +765,51 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
             },
         )
 
-    # 4. Normal / Genuine reset
-    elif trigger in ("SET_CURRENT_LOCATION", "RESTORE_GENUINE", "SLIDER_BIOMETRIC_PASS"):
+    # 6. Slider Biometric Pass
+    elif trigger == "SLIDER_BIOMETRIC_PASS":
         _current_state["alertBanner"] = {
             "active": True,
-            "title": "STATUS: AUTHENTICATED & OPTIMAL",
-            "message": "Continuous multi-modal verification running. All 5 security axes exceed 95% trust baseline.",
+            "title": "✅ ORDER DELIVERED — BIOMETRIC VERIFIED",
+            "message": f"Rider {rider_id} touch dynamics matched enrolled baseline envelope (Beta).",
             "level": "info",
         }
-        _current_state["telemetry"]["gpsSpeed"]["mockLocationDetected"] = False
-        _current_state["telemetry"]["gpsSpeed"]["teleportFlag"] = False
-        _current_state["telemetry"]["gpsSpeed"]["speedKmh"] = 24.5
-        _current_state["telemetry"]["gpsSpeed"]["status"] = "optimal"
         for axis in _current_state["spiderweb_radar"]:
-            axis["status"] = "optimal"
-            axis["value"] = 96
+            if axis["axis"] == "Kinetic Slider":
+                axis["value"] = 96
+                axis["status"] = "optimal"
+                axis["description"] = "Kinetic slider verified within biological baseline"
 
-        if trigger == "SLIDER_BIOMETRIC_PASS":
-            record_dashboard_event(
-                rider_id=rider_id,
-                signal="swipe",
-                status="verified",
-                severity=0,
-                detail={
-                    "failed_features": [],
-                    "reason": "Swipe features within biological envelope (98% confidence)",
-                },
-            )
-        elif trigger == "SET_CURRENT_LOCATION":
-            record_dashboard_event(
-                rider_id=rider_id,
-                signal="context",
-                status="normal",
-                severity=0,
-                detail={
-                    "changes": {"location_changed": False, "device_id_changed": False},
-                    "risk_flags": [],
-                },
-            )
+        record_dashboard_event(
+            rider_id=rider_id,
+            signal="swipe",
+            status="verified",
+            severity=0,
+            detail={
+                "failed_features": [],
+                "reason": "Swipe features within biological envelope (98% confidence)",
+            },
+        )
 
     elif trigger == "SLIDER_CALIBRATION":
+        _current_state["alertBanner"] = {
+            "active": True,
+            "title": "🎯 BIOMETRIC BASELINE ENROLLED",
+            "message": f"Rider {rider_id} completed 3-swipe kinetic calibration (Beta).",
+            "level": "info",
+        }
+        for axis in _current_state["spiderweb_radar"]:
+            if axis["axis"] == "Kinetic Slider":
+                axis["value"] = 98
+                axis["status"] = "optimal"
+                axis["description"] = "Personalized 3-swipe baseline enrolled on device"
+
+        _current_state["incidentHistory"].insert(0, {
+            "id": f"INC-{int(datetime.now(UTC).timestamp()) % 10000}",
+            "timestamp": timestamp_str,
+            "type": "Biometric Calibration",
+            "severity": "low",
+            "detail": "Rider enrolled personalized 3-swipe kinetic baseline on device.",
+        })
         record_dashboard_event(
             rider_id=rider_id,
             signal="swipe",
@@ -745,7 +817,39 @@ async def receive_telemetry(request: Request) -> dict[str, Any]:
             severity=0,
             detail={
                 "failed_features": [],
-                "reason": "Personalized 3-swipe baseline enrolled on device",
+                "reason": "Personalized 3-swipe baseline enrolled on device (Beta)",
+            },
+        )
+
+    elif trigger == "FORCE_COMPLETE_DELIVERY":
+        _current_state["alertBanner"] = {
+            "active": True,
+            "title": "⚡ ORDER DELIVERED — FORCE OVERRIDE",
+            "message": f"Rider {rider_id} completed delivery via authorized manual bypass.",
+            "level": "info",
+        }
+        for axis in _current_state["spiderweb_radar"]:
+            if axis["axis"] == "Kinetic Slider":
+                axis["value"] = 88
+                axis["status"] = "optimal"
+                axis["description"] = "Kinetic slider manual force complete override"
+
+        _current_state["incidentHistory"].insert(0, {
+            "id": f"INC-{int(datetime.now(UTC).timestamp()) % 10000}",
+            "timestamp": timestamp_str,
+            "type": "Delivery Force Override",
+            "severity": "low",
+            "detail": f"Delivery completed via authorized manual bypass by rider {rider_id}.",
+        })
+        record_dashboard_event(
+            rider_id=rider_id,
+            signal="swipe",
+            status="verified",
+            severity=0,
+            detail={
+                "failed_features": [],
+                "reason": "Force complete delivery override authorized by rider/supervisor",
+                "override": True,
             },
         )
 
@@ -803,6 +907,25 @@ _dashboard_events: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "id": "evt-init-04",
+        "rider_id": "Arnav Nisal",
+        "signal": "face",
+        "status": "verified",
+        "severity": 0,
+        "created_at": datetime.now(UTC).isoformat(),
+        "detail": {
+            "partner_name": "Arnav Nisal",
+            "partner_id": "rider-01",
+            "order_id": "HF-2048",
+            "similarity": 0.862,
+            "threshold": 0.45,
+            "confidence_pct": 98.4,
+            "result": "match",
+            "reason": "Biometrics verified: Arnav Nisal authorized for pickup.",
+            "verdict": "verified",
+        },
+    },
 ]
 
 
@@ -827,6 +950,61 @@ def record_dashboard_event(
         _dashboard_events.pop()
 
 
+class DashboardEventInput(BaseModel):
+    rider_id: str
+    signal: str = "face"
+    status: str = "verified"
+    severity: int = 0
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/v1/dashboard/events")
+async def receive_dashboard_event(payload: DashboardEventInput) -> dict[str, Any]:
+    record_dashboard_event(
+        rider_id=payload.rider_id,
+        signal=payload.signal,
+        status=payload.status,
+        severity=payload.severity,
+        detail=payload.detail,
+    )
+    if payload.signal == "face":
+        partner_name = payload.detail.get("partner_name", payload.rider_id)
+        if payload.status == "verified":
+            for axis in _current_state["spiderweb_radar"]:
+                if axis["axis"] == "Restaurant Face":
+                    axis["value"] = 98
+                    axis["status"] = "optimal"
+                    axis["description"] = f"Face verified: {partner_name} authorized"
+            _current_state["alertBanner"] = {
+                "active": True,
+                "title": f"👤 FACE VERIFIED — {partner_name.upper()}",
+                "message": "Biometric ArcFace matched registered profile for order pickup.",
+                "level": "info",
+            }
+        elif payload.status in ("alert", "failed"):
+            for axis in _current_state["spiderweb_radar"]:
+                if axis["axis"] == "Restaurant Face":
+                    axis["value"] = 28
+                    axis["status"] = "critical"
+                    axis["description"] = f"Face mismatch alert: Person does not match {partner_name}"
+            _current_state["alertBanner"] = {
+                "active": True,
+                "title": f"🚨 FACE MISMATCH ALERT — {partner_name.upper()}",
+                "message": f"Unrecognized person attempting pickup for {partner_name}.",
+                "level": "error",
+            }
+            _current_state["overall_trust_score"] = max(10.0, _current_state["overall_trust_score"] - 15.0)
+            _current_state["monthly_strikes"] += 1
+        elif payload.status in ("review", "warn", "step_up"):
+            for axis in _current_state["spiderweb_radar"]:
+                if axis["axis"] == "Restaurant Face":
+                    axis["value"] = 55
+                    axis["status"] = "warning"
+                    axis["description"] = f"Face security review: {payload.detail.get('reason', 'Suspicious face frame')}"
+        await broadcast_tower_state(_current_state)
+    return {"status": "ok", "recorded": True, "event_count": len(_dashboard_events)}
+
+
 @app.get("/api/v1/dashboard")
 def get_dashboard_summary(limit: int = 200) -> dict[str, Any]:
     events = _dashboard_events[:limit]
@@ -834,11 +1012,13 @@ def get_dashboard_summary(limit: int = 200) -> dict[str, Any]:
     alerts = sum(1 for e in events if e.get("status") in ("alert", "failed"))
     reviews = sum(1 for e in events if e.get("status") in ("alert", "review", "warn", "step_up", "failed"))
     riders_with_concerns = len({e.get("rider_id") for e in events if e.get("status") in ("alert", "review", "warn", "step_up", "failed")})
-    counts = {"context": 0, "swipe": 0, "voice": 0}
+    counts = {"context": 0, "swipe": 0, "voice": 0, "face": 0}
     for e in events:
         sig = e.get("signal", "")
         if sig in counts:
             counts[sig] += 1
+        elif sig:
+            counts[sig] = counts.get(sig, 0) + 1
     return {
         "total_checks": total,
         "alerts": alerts,
@@ -847,6 +1027,27 @@ def get_dashboard_summary(limit: int = 200) -> dict[str, Any]:
         "signal_counts": counts,
         "events": events,
     }
+
+
+@app.post("/api/v1/dashboard/clear")
+@app.delete("/api/v1/dashboard")
+def clear_dashboard_events() -> dict[str, Any]:
+    global _dashboard_events
+    _dashboard_events.clear()
+    _current_state["incidentHistory"].clear()
+    _current_state["alertBanner"] = {
+        "active": False,
+        "title": "STATUS: AUTHENTICATED & OPTIMAL",
+        "message": "Continuous multi-modal verification running. All security axes normal.",
+        "level": "info",
+    }
+    _current_state["overall_trust_score"] = 96.5
+    _current_state["monthly_strikes"] = 0
+    _current_state["isLocked"] = False
+    for axis in _current_state["spiderweb_radar"]:
+        axis["status"] = "optimal"
+        axis["value"] = 96
+    return {"status": "ok", "cleared": True, "count": 0}
 
 
 @app.get("/dashboard")

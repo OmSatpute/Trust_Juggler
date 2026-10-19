@@ -1,53 +1,1111 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b1220"><title>Trust Operations · Hack Forge</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070d18">
+  <title>Trust Operations · Hack Forge Account Integrity</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-    :root{color-scheme:dark;--bg:#0b1220;--panel:#111c2e;--panel2:#0e192a;--line:#24344a;--text:#edf4ff;--muted:#8ea1ba;--blue:#38bdf8;--green:#34d399;--amber:#fbbf24;--red:#fb7185}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% -20%,#173454 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}button{font:inherit;color:inherit}.shell{max-width:1440px;margin:auto;padding:28px 34px 50px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.brand{display:flex;gap:12px;align-items:center}.mark{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:#07111f;background:linear-gradient(145deg,#7dd3fc,#2563eb);font-weight:900}.eyebrow,.kicker{font-size:10px;letter-spacing:1.7px;text-transform:uppercase;font-weight:800;color:var(--blue)}h1{font-size:22px;line-height:1.2;margin:2px 0 0;letter-spacing:-.4px}.topRight{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}.live{display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #146b56;border-radius:20px;color:var(--green);font-size:10px;font-weight:800;letter-spacing:.8px}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}.intro{color:var(--muted);margin:-18px 0 22px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{background:linear-gradient(160deg,#121e31,#0f1929);border:1px solid var(--line);border-radius:15px;padding:17px;box-shadow:0 12px 30px #02061729}.metric{min-height:116px;position:relative;overflow:hidden}.metric:after{content:"";position:absolute;width:100px;height:100px;right:-45px;bottom:-55px;border:1px solid #38bdf81c;border-radius:50%;box-shadow:0 0 0 12px #38bdf80a,0 0 0 24px #38bdf806}.metricLabel{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:800}.metricNum{font-size:32px;font-weight:750;letter-spacing:-1px;margin-top:7px}.metricSub{font-size:11px;color:var(--muted)}.metricNum.alert{color:var(--red)}.metricNum.review{color:var(--amber)}.layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.85fr);gap:14px;margin-top:14px}.cardHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}.cardTitle{font-size:14px;font-weight:800}.cardDesc{font-size:11px;color:var(--muted);margin-top:3px}.select{background:#0b1524;border:1px solid #30425a;border-radius:8px;color:#dbeafe;padding:7px 9px;font-size:11px;max-width:190px}.eventList{display:grid;gap:8px;max-height:480px;overflow:auto;padding-right:3px}.event{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:11px;background:#0c1727;border:1px solid #1d2b40;border-radius:10px;padding:11px}.eventIcon{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:#122942;color:var(--blue);font-size:13px;font-weight:800}.eventMain{min-width:0}.eventTitle{font-size:12px;font-weight:750;display:flex;gap:7px;align-items:center;flex-wrap:wrap}.eventMeta,.eventDetail{color:var(--muted);font-size:10px}.eventDetail{margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pill{border-radius:20px;padding:3px 8px;font-size:9px;font-weight:850;letter-spacing:.45px;text-transform:uppercase;white-space:nowrap}.pill-alert{color:#fecdd3;background:#4c1522}.pill-review,.pill-step_up,.pill-warn{color:#fde68a;background:#422d0b}.pill-normal,.pill-passed,.pill-verified{color:#a7f3d0;background:#0d352d}.pill-baseline,.pill-pending{color:#bae6fd;background:#102f46}.eventTime{text-align:right;color:var(--muted);font-size:10px;white-space:nowrap}.rightCol{display:grid;gap:14px;align-content:start}.radarWrap{position:relative;display:grid;place-items:center;min-height:255px}.radar{width:min(100%,330px);height:auto;overflow:visible}.legend{display:flex;justify-content:center;gap:18px;color:var(--muted);font-size:10px}.legend span{display:flex;align-items:center;gap:6px}.swatch{width:9px;height:9px;border-radius:3px;background:#38bdf8}.swatch.prev{background:#f59e0b}.radarEmpty{color:var(--muted);font-size:12px;text-align:center;max-width:270px}.signals{display:grid;gap:9px}.signalRow{display:grid;grid-template-columns:80px 1fr 50px;align-items:center;gap:10px;font-size:10px}.bar{height:6px;background:#1d2b40;border-radius:9px;overflow:hidden}.fill{height:100%;border-radius:9px;background:linear-gradient(90deg,#38bdf8,#fbbf24)}.count{text-align:right;color:#cbd5e1}.queue{display:grid;gap:8px}.queueItem{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #1d2b40;font-size:11px}.queueItem:last-child{border:0}.queueLabel{color:var(--muted)}.empty{padding:22px;text-align:center;color:var(--muted);font-size:12px}.footer{margin-top:16px;color:#667b96;font-size:10px;display:flex;justify-content:space-between;gap:12px}.refresh{border:0;background:none;color:var(--blue);cursor:pointer;font-size:11px}.refresh:hover{text-decoration:underline}.error{color:var(--amber);font-size:11px}.filters{display:flex;align-items:center;gap:8px}
-    @media(max-width:900px){.shell{padding:22px 18px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:1fr}.rightCol{grid-template-columns:1fr 1fr}.radarCard{grid-column:1/-1}}
-    @media(max-width:560px){.shell{padding:18px 12px}.top{align-items:flex-start}.topRight{flex-direction:column;align-items:flex-end;gap:5px}.grid{gap:9px}.metric{padding:13px;min-height:102px}.metricNum{font-size:27px}.layout{gap:10px}.rightCol{grid-template-columns:1fr}.radarCard{grid-column:auto}.event{grid-template-columns:30px minmax(0,1fr)}.eventTime{display:none}.eventIcon{width:29px;height:29px}.card{padding:14px}}
+    :root {
+      color-scheme: dark;
+      --bg: #070d18;
+      --bg-card: rgba(13, 22, 38, 0.78);
+      --bg-card-hover: rgba(18, 30, 52, 0.9);
+      --line: #1c2b42;
+      --line-bright: #2d4365;
+      --text: #f0f6fc;
+      --muted: #8fa5c2;
+      --subtle: #4e6584;
+      --blue: #38bdf8;
+      --blue-glow: rgba(56, 189, 248, 0.22);
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.22);
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.25);
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.25);
+      --red: #f43f5e;
+      --red-glow: rgba(244, 63, 94, 0.25);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(ellipse 900px 500px at 80% -10%, rgba(30, 64, 110, 0.35) 0%, transparent 60%),
+        radial-gradient(ellipse 700px 400px at 15% 30%, rgba(88, 28, 135, 0.15) 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    button, select { font: inherit; color: inherit; }
+    
+    .shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px 28px 48px;
+    }
+
+    /* Header */
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 22px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+    .mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: #04101e;
+      background: linear-gradient(135deg, #38bdf8 0%, #2563eb 50%, #7c3aed 100%);
+      font-weight: 900;
+      font-size: 17px;
+      letter-spacing: -0.5px;
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.35);
+    }
+    .eyebrow {
+      font-size: 10px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      font-weight: 800;
+      color: var(--blue);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin: 3px 0 0;
+      letter-spacing: -0.6px;
+      background: linear-gradient(180deg, #ffffff 40%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .topRight {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .live {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      background: rgba(16, 185, 129, 0.08);
+      border-radius: 20px;
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.15);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 10px var(--green);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      border-color: var(--line-bright);
+    }
+    .cardHead {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .cardTitle {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .cardDesc {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    /* Metric Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      min-height: 105px;
+      position: relative;
+      overflow: hidden;
+    }
+    .metric:after {
+      content: "";
+      position: absolute;
+      width: 90px;
+      height: 90px;
+      right: -35px;
+      bottom: -45px;
+      border: 1px solid rgba(56, 189, 248, 0.12);
+      border-radius: 50%;
+      box-shadow: 0 0 0 12px rgba(56, 189, 248, 0.04), 0 0 0 24px rgba(56, 189, 248, 0.02);
+      pointer-events: none;
+    }
+    .metricLabel {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1.1px;
+      font-weight: 800;
+    }
+    .metricNum {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-top: 6px;
+      line-height: 1.1;
+    }
+    .metricSub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .metricNum.alert { color: var(--red); text-shadow: 0 0 18px var(--red-glow); }
+    .metricNum.review { color: var(--amber); text-shadow: 0 0 18px var(--amber-glow); }
+    .metricNum.verified { color: var(--green); text-shadow: 0 0 18px var(--green-glow); }
+
+    /* Main 2-Col Layout */
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.95fr);
+      gap: 16px;
+    }
+    .rightCol {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+
+    /* Featured Face Biometrics Card */
+    .faceCard {
+      background: linear-gradient(145deg, rgba(17, 30, 52, 0.95), rgba(12, 22, 39, 0.9));
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.12), 0 12px 32px rgba(0,0,0,0.4);
+      position: relative;
+      overflow: hidden;
+    }
+    .faceCard::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #38bdf8, #818cf8, #34d399);
+    }
+    .faceDisplay {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      background: rgba(9, 16, 28, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 10px;
+    }
+    .faceAvatar {
+      width: 58px;
+      height: 58px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 26px;
+      background: linear-gradient(135deg, #1e3a5f, #0e1e33);
+      border: 2px solid var(--blue);
+      box-shadow: 0 0 16px var(--blue-glow);
+      flex-shrink: 0;
+    }
+    .faceAvatar.verified {
+      border-color: var(--green);
+      box-shadow: 0 0 18px var(--green-glow);
+      background: linear-gradient(135deg, #0d382c, #06241b);
+    }
+    .faceAvatar.alert {
+      border-color: var(--red);
+      box-shadow: 0 0 18px var(--red-glow);
+      background: linear-gradient(135deg, #471520, #260a11);
+    }
+    .faceAvatar.review {
+      border-color: var(--amber);
+      box-shadow: 0 0 18px var(--amber-glow);
+      background: linear-gradient(135deg, #3d280b, #211504);
+    }
+    .faceMeta {
+      flex: 1;
+      min-width: 0;
+    }
+    .facePartnerName {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .faceOrderInfo {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+    .faceScoreWrap {
+      margin-top: 12px;
+      background: rgba(6, 12, 22, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .faceScoreHeader {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .faceScoreBar {
+      height: 8px;
+      background: #152236;
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+    }
+    .faceScoreFill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #38bdf8, #10b981);
+      transition: width 0.4s ease;
+    }
+    .faceScoreThreshold {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #f59e0b;
+      box-shadow: 0 0 6px #f59e0b;
+    }
+    .faceReasonText {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* Event List */
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .select {
+      background: #091322;
+      border: 1px solid var(--line-bright);
+      border-radius: 8px;
+      color: #e2e8f0;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .select:hover, .select:focus {
+      border-color: var(--blue);
+    }
+    .clearBtn {
+      background: #132238;
+      border: 1px solid #273b56;
+      border-radius: 8px;
+      color: #dbeafe;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .clearBtn:hover {
+      background: #1c3354;
+      border-color: #3b5880;
+      color: #fff;
+    }
+    .clearBtn.danger {
+      background: rgba(244, 63, 94, 0.12);
+      border-color: rgba(244, 63, 94, 0.35);
+      color: #fecdd3;
+    }
+    .clearBtn.danger:hover {
+      background: rgba(244, 63, 94, 0.25);
+      border-color: var(--red);
+      color: #fff;
+    }
+    .refresh {
+      background: none;
+      border: 0;
+      color: var(--blue);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 8px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .refresh:hover {
+      background: rgba(56, 189, 248, 0.12);
+      text-decoration: underline;
+    }
+
+    .eventList {
+      display: grid;
+      gap: 8px;
+      max-height: 520px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .event {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      background: rgba(9, 17, 30, 0.7);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 12px 14px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .event:hover {
+      background: rgba(14, 25, 44, 0.85);
+      border-color: var(--line-bright);
+    }
+    .eventIcon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: #12253d;
+      color: var(--blue);
+      font-size: 15px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .eventIcon.face {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .eventIcon.voice {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--blue);
+    }
+    .eventIcon.swipe {
+      background: rgba(245, 158, 11, 0.12);
+      color: var(--amber);
+    }
+    .eventIcon.context {
+      background: rgba(168, 85, 247, 0.12);
+      color: var(--purple);
+    }
+    .eventMain { min-width: 0; }
+    .eventTitle {
+      font-size: 13px;
+      font-weight: 750;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .eventMeta {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 2px;
+    }
+    .eventDetail {
+      color: #cbd5e1;
+      font-size: 11px;
+      margin-top: 3px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .eventTime {
+      text-align: right;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    /* Badges */
+    .pill {
+      border-radius: 99px;
+      padding: 3px 9px;
+      font-size: 9.5px;
+      font-weight: 850;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pill-alert, .pill-failed {
+      color: #fecdd3;
+      background: #4c1522;
+      border: 1px solid rgba(244, 63, 94, 0.4);
+    }
+    .pill-review, .pill-step_up, .pill-warn {
+      color: #fde68a;
+      background: #422d0b;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+    .pill-normal, .pill-passed, .pill-verified {
+      color: #a7f3d0;
+      background: #0d352d;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .pill-baseline, .pill-pending {
+      color: #bae6fd;
+      background: #102f46;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+    }
+
+    /* Radar Chart */
+    .radarWrap {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-height: 250px;
+    }
+    .radar {
+      width: min(100%, 330px);
+      height: auto;
+      overflow: visible;
+    }
+    .legend {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 6px;
+    }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .swatch {
+      width: 9px;
+      height: 9px;
+      border-radius: 3px;
+      background: #38bdf8;
+    }
+    .swatch.prev { background: #f59e0b; }
+    .radarEmpty {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      max-width: 270px;
+    }
+
+    /* Signals Volume */
+    .signals { display: grid; gap: 10px; }
+    .signalRow {
+      display: grid;
+      grid-template-columns: 100px 1fr 55px;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+    }
+    .bar {
+      height: 7px;
+      background: #152236;
+      border-radius: 9px;
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      border-radius: 9px;
+      background: linear-gradient(90deg, #38bdf8, #a855f7);
+      transition: width 0.3s;
+    }
+    .count { text-align: right; color: #cbd5e1; font-weight: 700; }
+
+    /* Review Queue */
+    .queue { display: grid; gap: 8px; }
+    .queueItem {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+      padding: 10px 0;
+      border-bottom: 1px solid #17263b;
+      font-size: 11px;
+    }
+    .queueItem:last-child { border: 0; }
+    .queueLabel { color: var(--muted); font-size: 10.5px; }
+
+    .empty {
+      padding: 26px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      color: #64748b;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .error { color: var(--amber); font-size: 11px; }
+
+    /* Responsive */
+    @media (max-width: 950px) {
+      .shell { padding: 18px 16px; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .layout { grid-template-columns: 1fr; }
+      .rightCol { grid-template-columns: 1fr 1fr; }
+      .faceCard { grid-column: 1 / -1; }
+      .radarCard { grid-column: 1 / -1; }
+    }
+    @media (max-width: 600px) {
+      .top { flex-direction: column; align-items: flex-start; gap: 14px; }
+      .topRight { width: 100%; justify-content: space-between; }
+      .rightCol { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .metric { min-height: 90px; padding: 14px; }
+      .metricNum { font-size: 24px; }
+      .event { grid-template-columns: 32px minmax(0, 1fr); }
+      .eventTime { display: none; }
+    }
   </style>
 </head>
 <body>
   <main class="shell">
-    <header class="top"><div class="brand"><div class="mark">HF</div><div><div class="eyebrow">HACK FORGE / TRUST OPERATIONS</div><h1>Account integrity dashboard</h1></div></div><div class="topRight"><span id="updated">Connecting to demo API…</span><div class="live"><span class="dot"></span> LIVE</div></div></header>
-    <p class="intro">Monitor session checks, review unusual account activity, and inspect which signals need attention.</p>
+    <header class="top">
+      <div class="brand">
+        <div class="mark">HF</div>
+        <div>
+          <div class="eyebrow">HACK FORGE · TRUST OPERATIONS CENTER</div>
+          <h1>Account Integrity &amp; Biometric Verification</h1>
+        </div>
+      </div>
+      <div class="topRight">
+        <button class="clearBtn danger" id="clearDashboard" title="Clear all checks and reset dashboard">Clear Dashboard 🗑️</button>
+        <span id="updated" style="color: var(--muted);">Connecting to API…</span>
+        <div class="live"><span class="dot"></span> LIVE</div>
+      </div>
+    </header>
+
+    <!-- Summary Metrics -->
     <section class="grid" aria-label="Summary metrics">
-      <article class="card metric"><div class="metricLabel">Signal checks recorded</div><div class="metricNum" id="total">—</div><div class="metricSub">Across all rider profiles</div></article>
-      <article class="card metric"><div class="metricLabel">Alerts</div><div class="metricNum alert" id="alerts">—</div><div class="metricSub">Checks with an alert verdict</div></article>
-      <article class="card metric"><div class="metricLabel">Need review</div><div class="metricNum review" id="reviews">—</div><div class="metricSub">Checks raised for human review</div></article>
-      <article class="card metric"><div class="metricLabel">Riders with concerns</div><div class="metricNum" id="riders">—</div><div class="metricSub">Unique profiles with review signals</div></article>
+      <article class="card metric">
+        <div class="metricLabel">Signal checks recorded</div>
+        <div class="metricNum" id="total">—</div>
+        <div class="metricSub">Multi-modal verification events</div>
+      </article>
+      <article class="card metric">
+        <div class="metricLabel">Face Verifications</div>
+        <div class="metricNum verified" id="faceVerifiedCount">—</div>
+        <div class="metricSub">ArcFace pickup checks</div>
+      </article>
+      <article class="card metric">
+        <div class="metricLabel">Active Alerts</div>
+        <div class="metricNum alert" id="alerts">—</div>
+        <div class="metricSub">Mismatch &amp; high-risk checks</div>
+      </article>
+      <article class="card metric">
+        <div class="metricLabel">Need review</div>
+        <div class="metricNum review" id="reviews">—</div>
+        <div class="metricSub">Raised for staff review</div>
+      </article>
     </section>
+
+    <!-- Main Workspace -->
     <section class="layout">
-      <article class="card"><div class="cardHead"><div><div class="cardTitle">Recent activity</div><div class="cardDesc">Per-signal checks from the mobile demo</div></div><div class="filters"><select class="select" id="filter"><option value="all">All outcomes</option><option value="concerns">Alerts & reviews</option><option value="alert">Alerts only</option></select><button class="refresh" id="refresh">Refresh ↻</button></div></div><div id="events" class="eventList"><div class="empty">Loading recent checks…</div></div></article>
+      <!-- Left Column: Activity Log -->
+      <article class="card">
+        <div class="cardHead">
+          <div>
+            <div class="cardTitle">Recent Biometric &amp; Session Activity</div>
+            <div class="cardDesc">Live streaming checks from pickup counter (ArcFace) &amp; mobile app (Voice/Swipe/Context)</div>
+          </div>
+          <div class="filters">
+            <select class="select" id="filter" aria-label="Filter events">
+              <option value="all">All signals &amp; outcomes</option>
+              <option value="face">Face recognition only (👤)</option>
+              <option value="voice">Voice match only (🎤)</option>
+              <option value="swipe">Swipe pattern only (↔)</option>
+              <option value="context">Sign-in context only (⌖)</option>
+              <option value="concerns">Alerts &amp; reviews only</option>
+              <option value="alert">Alerts only</option>
+            </select>
+            <button class="clearBtn" id="clearLogs" title="Clear activity log list">Clear ✕</button>
+            <button class="refresh" id="refresh">Refresh ↻</button>
+          </div>
+        </div>
+        <div id="events" class="eventList">
+          <div class="empty">Loading recent checks…</div>
+        </div>
+      </article>
+
+      <!-- Right Column: Face Biometric Spotlight, Radar, Volume, Queue -->
       <div class="rightCol">
-        <article class="card radarCard"><div class="cardHead"><div><div class="cardTitle">Rider signal profile</div><div class="cardDesc" id="radarCaption">Select a rider from recent activity</div></div><select class="select" id="rider"><option value="">Choose rider</option></select></div><div class="radarWrap" id="radarWrap"><div class="radarEmpty">Choose a rider to compare their latest signal checks with the previous check for each signal.</div></div><div class="legend"><span><i class="swatch"></i>Latest check</span><span><i class="swatch prev"></i>Previous check</span></div></article>
-        <article class="card"><div class="cardHead"><div><div class="cardTitle">Signal review volume</div><div class="cardDesc">Concern outcomes by signal</div></div></div><div id="signalCounts" class="signals"></div></article>
-        <article class="card"><div class="cardHead"><div><div class="cardTitle">Review queue</div><div class="cardDesc">Latest items that may need attention</div></div></div><div id="queue" class="queue"></div></article>
+        <!-- Live Face Biometrics Spotlight Card -->
+        <article class="card faceCard" id="faceFeatureCard">
+          <div class="cardHead">
+            <div>
+              <div class="cardTitle">
+                <span>👤</span> Counter Face Biometrics
+              </div>
+              <div class="cardDesc">ArcFace neural template match at merchant pickup</div>
+            </div>
+            <span class="pill pill-baseline" id="faceBadge">AWAITING SCAN</span>
+          </div>
+
+          <div class="faceDisplay">
+            <div class="faceAvatar" id="faceAvatar">👤</div>
+            <div class="faceMeta">
+              <div class="facePartnerName">
+                <span id="facePartnerName">No face check yet</span>
+              </div>
+              <div class="faceOrderInfo" id="faceOrderInfo">Assigned order: Waiting for pickup scan…</div>
+            </div>
+          </div>
+
+          <div class="faceScoreWrap">
+            <div class="faceScoreHeader">
+              <span id="faceScoreLabel">ArcFace Cosine Similarity</span>
+              <span id="faceScoreVal">—</span>
+            </div>
+            <div class="faceScoreBar">
+              <div class="faceScoreFill" id="faceScoreFill" style="width: 0%;"></div>
+              <div class="faceScoreThreshold" style="left: 45%;" title="Threshold: 0.45"></div>
+            </div>
+          </div>
+
+          <div class="faceReasonText" id="faceReasonText">
+            Align delivery partner's face inside the camera oval in the Face App to verify order handover.
+          </div>
+        </article>
+
+        <!-- 4-Axis Multi-Modal Radar Chart -->
+        <article class="card radarCard">
+          <div class="cardHead">
+            <div>
+              <div class="cardTitle">Rider Security Profile</div>
+              <div class="cardDesc" id="radarCaption">Select a rider from recent activity</div>
+            </div>
+            <select class="select" id="rider">
+              <option value="">Choose rider</option>
+            </select>
+          </div>
+          <div class="radarWrap" id="radarWrap">
+            <div class="radarEmpty">Choose a rider to compare multi-modal security signals (Face, Voice, Swipe, Context).</div>
+          </div>
+          <div class="legend">
+            <span><i class="swatch"></i>Latest check</span>
+            <span><i class="swatch prev"></i>Previous check</span>
+          </div>
+        </article>
+
+        <!-- Signal Volume Bar Charts -->
+        <article class="card">
+          <div class="cardHead">
+            <div>
+              <div class="cardTitle">Verification Volume by Signal</div>
+              <div class="cardDesc">Checks recorded across security layers</div>
+            </div>
+          </div>
+          <div id="signalCounts" class="signals"></div>
+        </article>
+
+        <!-- Review Queue -->
+        <article class="card">
+          <div class="cardHead">
+            <div>
+              <div class="cardTitle">Review Queue</div>
+              <div class="cardDesc">Unusual items that require staff supervisor attention</div>
+            </div>
+          </div>
+          <div id="queue" class="queue"></div>
+        </article>
       </div>
     </section>
-    <footer class="footer"><span>Signal differences are review evidence, not proof of account sharing.</span><span id="connection" class="error"></span></footer>
+
+    <footer class="footer">
+      <span>Trust Juggler Multi-Modal Verification · Voice ECAPA-TDNN · YuNet + ArcFace · Kinetic Touch · Spatial Context</span>
+      <span id="connection" class="error"></span>
+    </footer>
   </main>
+
   <script>
-    const $=id=>document.getElementById(id);let snapshot=null,selected='';
-    const label=s=>({context:'Sign-in context',swipe:'Swipe pattern',voice:'Voice match'}[s]||s);
-    const titleCase=s=>s.replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
-    const severity=e=>e.severity||0;
-    const statusClass=s=>['alert','review','step_up','warn','normal','passed','verified','baseline','pending'].includes(s)?`pill-${s}`:'pill-pending';
-    const when=t=>{const d=new Date(t);return Number.isNaN(d.getTime())?t:d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});};
-    function detail(e){const d=e.detail||{};if(e.signal==='context'){const c=d.changes||{};const changed=Object.entries(c).filter(([,v])=>v).map(([k])=>titleCase(k.replace('_changed','')));return changed.length?`Changed: ${changed.join(', ')}`:(d.risk_flags||[]).join(' · ')||'No context changes flagged';}if(e.signal==='swipe')return d.failed_features?.length?`Different features: ${d.failed_features.map(titleCase).join(', ')}`:d.reason||'Swipe features within saved range';if(e.signal==='voice'){const sim=d.kyc_similarity,layers=Object.entries(d.layers||{});const speaker=layers.find(([name])=>name==='kyc_speaker_match')?.[1]?.status||'pending';const pending=layers.filter(([,v])=>v.status==='pending').map(([name])=>titleCase(name));const concerns=layers.filter(([name,v])=>name!=='kyc_speaker_match'&&['warn','alert','failed'].includes(v.status)).map(([name])=>titleCase(name));return `Speaker match ${speaker}${sim==null?'':` · similarity ${Number(sim).toFixed(3)}`}${pending.length?` · pending: ${pending.join(', ')}`:''}${concerns.length?` · review: ${concerns.join(', ')}`:''}`;}return '';}
-    function render(){if(!snapshot)return;const events=snapshot.events||[];$('total').textContent=snapshot.total_checks;$('alerts').textContent=snapshot.alerts;$('reviews').textContent=snapshot.needs_review;$('riders').textContent=snapshot.riders_with_concerns;$('updated').textContent=`Updated ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;$('connection').textContent='';
-      const riders=[...new Set(events.map(e=>e.rider_id))].sort();const select=$('rider'),old=selected||select.value;select.innerHTML='<option value="">Choose rider</option>'+riders.map(r=>`<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');if(riders.includes(old)){select.value=old;selected=old;}else if(riders.length){select.value=riders[0];selected=riders[0];}
-      const f=$('filter').value;const shown=events.filter(e=>f==='all'||(f==='concerns'&&['alert','review','warn','step_up'].includes(e.status))||(f==='alert'&&e.status==='alert'));$('events').innerHTML=shown.length?shown.map(e=>`<div class="event"><div class="eventIcon">${e.signal==='context'?'⌖':e.signal==='swipe'?'↔':'◉'}</div><div class="eventMain"><div class="eventTitle">${escapeHtml(e.rider_id)} <span class="pill ${statusClass(e.status)}">${e.signal==='voice'?'overall ':''}${escapeHtml(e.status.replace('_',' '))}</span></div><div class="eventMeta">${label(e.signal)} · ${when(e.created_at)}</div><div class="eventDetail">${escapeHtml(detail(e))}</div></div><div class="eventTime">${new Date(e.created_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div></div>`).join(''):'<div class="empty">No checks match this filter.</div>';
-      const concern=events.filter(e=>['alert','review','warn','step_up'].includes(e.status));const top=concern.slice(0,4);$('queue').innerHTML=top.length?top.map(e=>`<div class="queueItem"><span><b>${escapeHtml(e.rider_id)}</b><br><span class="queueLabel">${label(e.signal)} · ${escapeHtml(detail(e))}</span></span><span class="pill ${statusClass(e.status)}">${escapeHtml(e.status.replace('_',' '))}</span></div>`).join(''):'<div class="empty">No current review items.</div>';
-      const counts=snapshot.signal_counts||{},max=Math.max(1,...Object.values(counts));$('signalCounts').innerHTML=Object.entries(counts).map(([s,n])=>`<div class="signalRow"><span>${label(s)}</span><div class="bar"><div class="fill" style="width:${Math.round(n/max*100)}%"></div></div><span class="count">${n} reviews</span></div>`).join('');drawRadar(events);
+    const $ = id => document.getElementById(id);
+    let snapshot = null, selected = '';
+
+    const label = s => ({
+      face: 'Face Biometrics',
+      voice: 'Voice Match (ECAPA)',
+      swipe: 'Swipe Pattern',
+      context: 'Sign-in Context'
+    }[s] || s);
+
+    const titleCase = s => String(s || '').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const severity = e => e.severity || 0;
+    const statusClass = s => ['alert', 'review', 'step_up', 'warn', 'normal', 'passed', 'verified', 'baseline', 'pending'].includes(s) ? `pill-${s}` : 'pill-pending';
+
+    const when = t => {
+      const d = new Date(t);
+      return Number.isNaN(d.getTime()) ? t : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    function detail(e) {
+      const d = e.detail || {};
+      if (e.signal === 'face') {
+        const pName = d.partner_name || e.rider_id || 'Partner';
+        const ord = d.order_id ? `Order #${d.order_id}` : '';
+        const sim = d.similarity != null ? `Similarity ${Number(d.similarity).toFixed(3)} (threshold ${d.threshold || 0.45})` : '';
+        const conf = d.confidence_pct ? `${d.confidence_pct}% match confidence` : '';
+        const fCount = d.face_count ? `(${d.face_count} people in frame)` : '';
+        const reason = d.reason || '';
+
+        const parts = [];
+        if (ord) parts.push(ord);
+        if (sim) parts.push(sim);
+        if (conf) parts.push(conf);
+        if (fCount) parts.push(fCount);
+        if (reason) parts.push(reason);
+        return parts.join(' · ') || 'Face recognition check recorded';
+      }
+
+      if (e.signal === 'context') {
+        const c = d.changes || {};
+        const changed = Object.entries(c).filter(([, v]) => v).map(([k]) => titleCase(k.replace('_changed', '')));
+        const flags = (d.risk_flags || []).join(' · ');
+        return changed.length ? `Changed: ${changed.join(', ')}${flags ? ` (${flags})` : ''}` : (flags || 'No context changes flagged');
+      }
+
+      if (e.signal === 'swipe') {
+        return d.failed_features?.length
+          ? `Different features: ${d.failed_features.map(titleCase).join(', ')}`
+          : d.reason || 'Swipe features within biological envelope';
+      }
+
+      if (e.signal === 'voice') {
+        const sim = d.kyc_similarity, layers = Object.entries(d.layers || {});
+        const speaker = layers.find(([name]) => name === 'kyc_speaker_match')?.[1]?.status || 'pending';
+        const pending = layers.filter(([, v]) => v.status === 'pending').map(([name]) => titleCase(name));
+        const concerns = layers.filter(([name, v]) => name !== 'kyc_speaker_match' && ['warn', 'alert', 'failed'].includes(v.status)).map(([name]) => titleCase(name));
+        return `Speaker match: ${speaker}${sim == null ? '' : ` · similarity ${Number(sim).toFixed(3)}`}${pending.length ? ` · pending: ${pending.join(', ')}` : ''}${concerns.length ? ` · review: ${concerns.join(', ')}` : ''}`;
+      }
+
+      return '';
     }
-    function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function drawRadar(events){const matches=events.filter(e=>e.rider_id===selected).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));if(!selected||!matches.length){$('radarWrap').innerHTML='<div class="radarEmpty">No checks yet for this rider.</div>';return;}const keys=['context','swipe','voice'],latest=[],previous=[];for(const k of keys){const a=matches.filter(e=>e.signal===k);latest.push(a[0]?severity(a[0]):0);previous.push(a[1]?severity(a[1]):0);}const names=['Context','Swipe','Voice'];const cx=165,cy=130,r=92,angles=[-90,30,150];const pt=(v,i)=>{const rad=angles[i]*Math.PI/180,rr=r*v/100;return `${cx+rr*Math.cos(rad)},${cy+rr*Math.sin(rad)}`;};const polygon=vals=>vals.map((v,i)=>pt(v,i)).join(' ');let rings='';for(const v of [25,50,75,100]){const pts=keys.map((_,i)=>pt(v,i)).join(' ');rings+=`<polygon points="${pts}" fill="none" stroke="#334155" stroke-width="1"/>`;}let axes=keys.map((_,i)=>`<line x1="${cx}" y1="${cy}" x2="${pt(100,i)}" stroke="#334155"/><text x="${cx+112*Math.cos(angles[i]*Math.PI/180)}" y="${cy+112*Math.sin(angles[i]*Math.PI/180)+4}" text-anchor="middle" fill="#a8bad0" font-size="10">${names[i]}</text>`).join('');$('radarCaption').textContent=`Concern level · clear 0 / review 65 / alert 100 · ${selected}`;$('radarWrap').innerHTML=`<svg class="radar" viewBox="0 0 330 260" role="img" aria-label="Latest and previous concern level by sign-in context, swipe, and voice">${rings}${axes}<polygon points="${polygon(previous)}" fill="#f59e0b" fill-opacity=".12" stroke="#f59e0b" stroke-width="2"/><polygon points="${polygon(latest)}" fill="#38bdf8" fill-opacity=".2" stroke="#38bdf8" stroke-width="2.5"/>${latest.map((v,i)=>{const p=pt(v,i).split(',');return `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#7dd3fc"/>`;}).join('')}</svg>`;}
-    async function load(){try{const apiBase=(window.location.protocol.startsWith('http')?'':'http://localhost:8000');const response=await fetch(`${apiBase}/api/v1/dashboard?limit=200`,{cache:'no-store'});if(!response.ok)throw new Error(`API returned ${response.status}`);snapshot=await response.json();render();}catch(error){$('updated').textContent='Dashboard offline';$('connection').textContent=`Could not load report data: ${error.message}`;}}
-    $('refresh').addEventListener('click',load);$('filter').addEventListener('change',render);$('rider').addEventListener('change',e=>{selected=e.target.value;render();});load();setInterval(load,2000);
+
+    function updateFaceSpotlight(events) {
+      const latestFace = events.find(e => e.signal === 'face');
+      if (!latestFace) return;
+
+      const d = latestFace.detail || {};
+      const partnerName = d.partner_name || latestFace.rider_id || 'Assigned Partner';
+      const orderId = d.order_id ? `Order #${d.order_id}` : 'Counter Pickup';
+      const status = latestFace.status || 'verified';
+      const sim = d.similarity != null ? Number(d.similarity) : null;
+      const threshold = Number(d.threshold || 0.45);
+      const conf = d.confidence_pct != null ? d.confidence_pct : (sim != null ? (sim >= threshold ? 95 : 30) : 0);
+
+      $('facePartnerName').textContent = partnerName;
+      $('faceOrderInfo').textContent = `${orderId} · Checked at ${new Date(latestFace.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+
+      const badge = $('faceBadge');
+      const avatar = $('faceAvatar');
+      badge.className = `pill ${statusClass(status)}`;
+
+      avatar.className = 'faceAvatar';
+      if (status === 'verified' || status === 'passed') {
+        badge.textContent = '✓ BIOMETRIC MATCH';
+        avatar.classList.add('verified');
+        avatar.textContent = '✓';
+      } else if (status === 'alert' || status === 'failed') {
+        badge.textContent = d.result === 'multiple_faces' ? '⚠️ MULTIPLE PEOPLE' : '✕ FACE MISMATCH';
+        avatar.classList.add('alert');
+        avatar.textContent = '✕';
+      } else if (status === 'baseline') {
+        badge.textContent = '👤 ENROLLED';
+        avatar.classList.add('verified');
+        avatar.textContent = '👤';
+      } else {
+        badge.textContent = 'STAFF REVIEW';
+        avatar.classList.add('review');
+        avatar.textContent = '⚠️';
+      }
+
+      if (sim != null) {
+        $('faceScoreVal').textContent = `${sim.toFixed(3)} (${conf}% confidence)`;
+        const fillPct = Math.min(100, Math.max(0, Math.round(sim * 100)));
+        $('faceScoreFill').style.width = `${fillPct}%`;
+        $('faceScoreFill').style.background = sim >= threshold
+          ? 'linear-gradient(90deg, #38bdf8, #10b981)'
+          : 'linear-gradient(90deg, #f43f5e, #f59e0b)';
+      } else {
+        $('faceScoreVal').textContent = status.toUpperCase();
+        $('faceScoreFill').style.width = '100%';
+        $('faceScoreFill').style.background = '#38bdf8';
+      }
+
+      $('faceReasonText').textContent = d.reason || (
+        status === 'verified'
+          ? `Biometrics matched registered template for ${partnerName}. Handover authorized.`
+          : `Face verification flagged for supervisor review.`
+      );
+    }
+
+    function render() {
+      if (!snapshot) return;
+      const events = snapshot.events || [];
+      $('total').textContent = snapshot.total_checks ?? events.length;
+      $('alerts').textContent = snapshot.alerts ?? events.filter(e => ['alert', 'failed'].includes(e.status)).length;
+      $('reviews').textContent = snapshot.needs_review ?? events.filter(e => ['alert', 'review', 'warn', 'step_up'].includes(e.status)).length;
+
+      // Count face verifications
+      const faceCount = events.filter(e => e.signal === 'face' && ['verified', 'passed', 'baseline'].includes(e.status)).length;
+      $('faceVerifiedCount').textContent = faceCount;
+
+      $('updated').textContent = `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      $('connection').textContent = '';
+
+      updateFaceSpotlight(events);
+
+      // Rider selector
+      const riders = [...new Set(events.map(e => e.rider_id))].filter(Boolean).sort();
+      const select = $('rider'), old = selected || select.value;
+      select.innerHTML = '<option value="">Choose rider</option>' + riders.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+      if (riders.includes(old)) {
+        select.value = old; selected = old;
+      } else if (riders.length) {
+        select.value = riders[0]; selected = riders[0];
+      }
+
+      // Filter events
+      const f = $('filter').value;
+      const shown = events.filter(e => {
+        if (f === 'all') return true;
+        if (f === 'face') return e.signal === 'face';
+        if (f === 'voice') return e.signal === 'voice';
+        if (f === 'swipe') return e.signal === 'swipe';
+        if (f === 'context') return e.signal === 'context';
+        if (f === 'concerns') return ['alert', 'review', 'warn', 'step_up', 'failed'].includes(e.status);
+        if (f === 'alert') return e.status === 'alert' || e.status === 'failed';
+        return true;
+      });
+
+      $('events').innerHTML = shown.length ? shown.map(e => {
+        const iconChar = e.signal === 'face' ? '👤' : (e.signal === 'voice' ? '🎤' : (e.signal === 'swipe' ? '↔' : '⌖'));
+        const iconClass = e.signal === 'face' ? 'face' : (e.signal === 'voice' ? 'voice' : (e.signal === 'swipe' ? 'swipe' : 'context'));
+        const partnerTitle = e.detail?.partner_name || e.rider_id;
+
+        return `
+          <div class="event">
+            <div class="eventIcon ${iconClass}">${iconChar}</div>
+            <div class="eventMain">
+              <div class="eventTitle">
+                ${escapeHtml(partnerTitle)}
+                <span class="pill ${statusClass(e.status)}">${escapeHtml(e.status.replace('_', ' '))}</span>
+              </div>
+              <div class="eventMeta">${label(e.signal)} · ${when(e.created_at)}</div>
+              <div class="eventDetail">${escapeHtml(detail(e))}</div>
+            </div>
+            <div class="eventTime">${new Date(e.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+          </div>
+        `;
+      }).join('') : '<div class="empty">No checks match this filter.</div>';
+
+      // Queue
+      const concern = events.filter(e => ['alert', 'review', 'warn', 'step_up'].includes(e.status));
+      const top = concern.slice(0, 4);
+      $('queue').innerHTML = top.length ? top.map(e => `
+        <div class="queueItem">
+          <span>
+            <b>${escapeHtml(e.detail?.partner_name || e.rider_id)}</b><br>
+            <span class="queueLabel">${label(e.signal)} · ${escapeHtml(detail(e))}</span>
+          </span>
+          <span class="pill ${statusClass(e.status)}">${escapeHtml(e.status.replace('_', ' '))}</span>
+        </div>
+      `).join('') : '<div class="empty">No current review items. All systems clear.</div>';
+
+      // Signal counts
+      const counts = snapshot.signal_counts || { context: 0, swipe: 0, voice: 0, face: 0 };
+      // Ensure face count is tracked
+      if (counts.face == null) {
+        counts.face = events.filter(e => e.signal === 'face').length;
+      }
+      const max = Math.max(1, ...Object.values(counts));
+      $('signalCounts').innerHTML = Object.entries(counts).map(([s, n]) => `
+        <div class="signalRow">
+          <span>${label(s)}</span>
+          <div class="bar"><div class="fill" style="width:${Math.round(n / max * 100)}%"></div></div>
+          <span class="count">${n} checks</span>
+        </div>
+      `).join('');
+
+      drawRadar(events);
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function drawRadar(events) {
+      const matches = events.filter(e => e.rider_id === selected || e.detail?.partner_name === selected).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      if (!selected || !matches.length) {
+        $('radarWrap').innerHTML = '<div class="radarEmpty">No multi-modal checks yet for this rider.</div>';
+        return;
+      }
+
+      // 4-axis multi-modal profile: Context, Swipe, Voice, Face
+      const keys = ['context', 'swipe', 'voice', 'face'];
+      const names = ['Context', 'Swipe', 'Voice', 'Face'];
+      const latest = [], previous = [];
+
+      for (const k of keys) {
+        const a = matches.filter(e => e.signal === k);
+        latest.push(a[0] ? severity(a[0]) : 0);
+        previous.push(a[1] ? severity(a[1]) : 0);
+      }
+
+      const cx = 165, cy = 130, r = 90;
+      // 4 points diamond: Top, Right, Bottom, Left
+      const angles = [-90, 0, 90, 180];
+
+      const pt = (v, i) => {
+        const rad = angles[i] * Math.PI / 180;
+        const rr = r * (v / 100);
+        return `${cx + rr * Math.cos(rad)},${cy + rr * Math.sin(rad)}`;
+      };
+
+      const polygon = vals => vals.map((v, i) => pt(v, i)).join(' ');
+
+      let rings = '';
+      for (const v of [25, 50, 75, 100]) {
+        const pts = keys.map((_, i) => pt(v, i)).join(' ');
+        rings += `<polygon points="${pts}" fill="none" stroke="#23354e" stroke-width="1"/>`;
+      }
+
+      let axes = keys.map((_, i) => {
+        const rad = angles[i] * Math.PI / 180;
+        const lx = cx + (r + 20) * Math.cos(rad);
+        const ly = cy + (r + 14) * Math.sin(rad) + 4;
+        return `
+          <line x1="${cx}" y1="${cy}" x2="${pt(100, i)}" stroke="#2a3f5d" stroke-width="1"/>
+          <text x="${lx}" y="${ly}" text-anchor="middle" fill="#94a3b8" font-size="10.5" font-weight="700">${names[i]}</text>
+        `;
+      }).join('');
+
+      $('radarCaption').textContent = `Concern level (0 clear / 65 review / 100 alert) · ${selected}`;
+      $('radarWrap').innerHTML = `
+        <svg class="radar" viewBox="0 0 330 260" role="img" aria-label="Latest and previous concern level across 4 signals">
+          ${rings}
+          ${axes}
+          <polygon points="${polygon(previous)}" fill="#f59e0b" fill-opacity=".12" stroke="#f59e0b" stroke-width="2"/>
+          <polygon points="${polygon(latest)}" fill="#38bdf8" fill-opacity=".22" stroke="#38bdf8" stroke-width="2.5"/>
+          ${latest.map((v, i) => {
+            const p = pt(v, i).split(',');
+            return `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#38bdf8"/>`;
+          }).join('')}
+        </svg>
+      `;
+    }
+
+    async function load() {
+      try {
+        const apiBase = window.location.port === '8000'
+          ? ''
+          : (window.location.hostname ? `http://${window.location.hostname}:8000` : 'http://localhost:8000');
+        const response = await fetch(`${apiBase}/api/v1/dashboard?limit=200`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        snapshot = await response.json();
+        render();
+      } catch (error) {
+        $('updated').textContent = 'Dashboard offline';
+        $('connection').textContent = `Could not reach backend: ${error.message}. Ensure FastAPI is running on port 8000.`;
+      }
+    }
+
+    async function clearData(isFullReset) {
+      if (isFullReset && !confirm('Clear all recorded signals and reset the dashboard?')) return;
+      try {
+        const apiBase = window.location.port === '8000'
+          ? ''
+          : (window.location.hostname ? `http://${window.location.hostname}:8000` : 'http://localhost:8000');
+        const res = await fetch(`${apiBase}/api/v1/dashboard/clear`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await load();
+      } catch (err) {
+        $('connection').textContent = `Failed to clear: ${err.message}`;
+      }
+    }
+
+    $('refresh').addEventListener('click', load);
+    $('filter').addEventListener('change', render);
+    $('rider').addEventListener('change', e => { selected = e.target.value; render(); });
+    $('clearDashboard').addEventListener('click', () => clearData(true));
+    $('clearLogs').addEventListener('click', () => clearData(false));
+
+    load();
+    setInterval(load, 2000);
   </script>
 </body>
 </html>
